@@ -2,7 +2,7 @@
 
 ## 2026-11-25 quality pass and GitHub handoff
 
-The quality pass preserved Google Drive persistence, owner-restricted OAuth, continuous original-PDF reading, whole-PDF summary/quiz processing, and NVIDIA reasoning. It corrected text line preservation and bounded extraction memory, keyed reader state by document ID, memoized PDF page surfaces, and formatted summary structure safely. `pnpm typecheck`, 21 tests in 9 files, and `pnpm build` passed. The source scan found no locally configured secrets in the intended Git files. See `QUALITY_REVIEW_2026-11-25.md` for findings, evidence, and outstanding real-service/device checks. The user's new GitHub repository is `toanhduycm32/Margin-Web-studyspace-pwa-`; the push result is recorded separately once complete.
+The quality pass preserved Google Drive persistence, owner-restricted OAuth, continuous original-PDF reading, whole-PDF summary/quiz processing, and NVIDIA reasoning. It corrected text line preservation and bounded extraction memory, keyed reader state by document ID, memoized PDF page surfaces, and formatted summary structure safely. `pnpm typecheck`, 21 tests in 9 files, and `pnpm build` passed. The source scan found no locally configured secrets in the intended Git files. See `QUALITY_REVIEW_2026-11-25.md` for findings, evidence, and outstanding real-service/device checks. The standalone app repository was pushed to `toanhduycm32/Margin-Web-studyspace-pwa-` on `main`, beginning with commit `f2703b5`; local `.env.local`, build output, dependencies, and unrelated parent-project changes were excluded. The existing localhost server was not restarted because automatic command review rejected stopping its process; a manual restart is required to see this build on port 3000.
 
 ## Outcome
 
