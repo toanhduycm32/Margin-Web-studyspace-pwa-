@@ -50,4 +50,19 @@ describe("tenant-bound whole-PDF processing", () => {
       (artifact.payload as { text: string }).text.indexOf("Chapter 2"));
     expect(artifact.sections).toHaveLength(2);
   });
+  it("finalizes a segment after its response is serialized through JSON", async () => {
+    vi.stubEnv("SESSION_SECRET", Buffer.alloc(32, 4).toString("base64"));
+    const { processChunk, finalize } = await import("./pipeline");
+    const principal = { sub: "sub-alice", accessToken: "alice-token" };
+    const input = { kind: "summary" as const, operationId: "12345678-1234-1234-1234-123456789abc",
+      documentId: "file12345678", sourceMd5: "a".repeat(32), chunkIndex: 0, chunkCount: 1,
+      startPage: 1, endPage: 1, pageCount: 1, requestedCount: 0, emptyPages: [],
+      text: "Page 1\nSmall source note.", summaryProfile: "academic" as const, wordTarget: 20,
+      section: { id: "section-1", title: "Source note", startPage: 1, endPage: 1, source: "heading" as const } };
+    const wire = JSON.parse(JSON.stringify(await processChunk(principal, input)));
+    await finalize(principal, { kind: "summary", operationId: input.operationId, documentId: input.documentId,
+      sourceMd5: input.sourceMd5, requestedCount: 0, summaryProfile: "academic", maps: [wire] });
+    const artifact = vi.mocked(saveArtifact).mock.calls.at(-1)![1];
+    expect((artifact.payload as { text: string }).text).toContain("Small source note.");
+  });
 });

@@ -42,10 +42,14 @@ export function verify<T>(value: string): T | null {
   catch { return null; }
 }
 
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) =>
-    `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(",")}}`;
+function canonical(value: unknown, legacy = false): string {
+  if (Array.isArray(value)) return `[${Array.from(value, (item) => canonical(item, legacy)).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    // JSON removes undefined object properties on both HTTP and Drive round trips.
+    const keys = Object.keys(record).filter((key) => legacy || record[key] !== undefined).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${canonical(record[key], legacy)}`).join(",")}}`;
+  }
   return JSON.stringify(value) ?? "null";
 }
 
@@ -54,7 +58,18 @@ export function signMap(value: unknown): string {
 }
 
 export function verifyMap(value: unknown, signature: string): boolean {
-  const expected = Buffer.from(signMap(value), "base64url");
   const received = Buffer.from(signature, "base64url");
-  return received.length === expected.length && timingSafeEqual(received, expected);
+  const valid = (payload: unknown, legacy = false) => {
+    const expected = createHmac("sha256", key("map-v1")).update(canonical(payload, legacy)).digest();
+    return received.length === expected.length && timingSafeEqual(received, expected);
+  };
+  if (valid(value)) return true;
+  // The first schema-3 release signed optional undefined fields before JSON
+  // omitted them. Accept those authenticated Drive records so retries can reuse work.
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const map = value as Record<string, unknown>;
+  if (map.schema !== 3 || map.ruleVersion !== "2026-11-25-1") return false;
+  const originalShape = { ...map, summaryProfile: map.summaryProfile, wordTarget: map.wordTarget,
+    plannedFormats: map.plannedFormats, plannedFamilies: map.plannedFamilies };
+  return valid(originalShape, true);
 }
