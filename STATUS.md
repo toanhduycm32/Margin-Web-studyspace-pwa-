@@ -1,5 +1,11 @@
 # Build status — 2026-11-24
 
+## 2026-11-25 processing signature repair
+
+The user reported `Processing result failed integrity validation` after AI processing. The failure was reproduced in the normal segment → JSON response → finalization path. Schema-3 map objects were signed while some optional properties held JavaScript `undefined`; HTTP JSON serialization omitted those properties. Finalization verified the resulting object and rejected its signature. The same mismatch affected signed intermediate records saved to Google Drive. The failure was deterministic for generated maps with these optional fields and was not evidence of a changed PDF or account leak.
+
+Map signing now canonicalizes the JSON representation actually transmitted and stored. Verification also accepts authenticated schema-3 records from the initial release by restoring only its known omitted optional fields for the legacy signature check, allowing interrupted work to be reused. A tampered payload still fails. New tests cover the HTTP JSON round trip, legacy signed map compatibility, and a complete segment-to-finalize path. TypeScript, all 46 automated tests, and the production build passed; the opt-in live NVIDIA test was not rerun because this change affects signing and transport, not inference. Code commit `14722f4` was pushed to GitHub `main`, and GitHub reported a successful Vercel deployment for that commit. Production `/api/config` returned HTTP 200 with no missing variables, and unauthenticated `/api/library` returned 401. An authenticated production finalize run remains unobserved; the user can retry the same action to reuse valid saved segments.
+
 ## 2026-11-25 AI reliability and learning quality upgrade
 
 The current task implements the attached “MARGIN — AI RELIABILITY & LEARNING QUALITY UPGRADE” on the standalone app. The root workflow v4.64, handoff, app guidance, source, and prior checkpoint were reviewed. The two-account allowlist and per-user Google Drive architecture remain intact; no Supabase or hosted database was introduced.
