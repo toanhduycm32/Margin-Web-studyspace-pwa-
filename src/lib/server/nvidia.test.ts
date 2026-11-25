@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { summarizeChunk } from "./nvidia";
+import { generateChunkQuestions, summarizeChunk } from "./nvidia";
 
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
@@ -11,7 +11,8 @@ describe("NVIDIA reasoning request", () => {
       choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ digest }) } }],
     }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    expect(await summarizeChunk("A source passage about a mechanism and its limits.", 1, 2, async () => {})).toBe(digest);
+    expect(await summarizeChunk("A source passage about a mechanism and its limits.", 1, 2,
+      "academic", "Introduction", "heading", 50, async () => {})).toBe(digest);
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://integrate.api.nvidia.com/v1/chat/completions");
     const body = JSON.parse(String(options.body));
@@ -26,7 +27,34 @@ describe("NVIDIA reasoning request", () => {
       .mockResolvedValueOnce(Response.json({ choices: [{ finish_reason: "stop", message: { content: "not-json" } }] }))
       .mockResolvedValueOnce(Response.json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ digest }) } }] })));
     const reserve = vi.fn(async () => {});
-    expect(await summarizeChunk("A passage about a mechanism and its limits.", 1, 1, reserve)).toBe(digest);
+    expect(await summarizeChunk("A passage about a mechanism and its limits.", 1, 1,
+      "academic", "Introduction", "heading", 50, reserve)).toBe(digest);
     expect(reserve).toHaveBeenCalledTimes(2);
+  });
+  it("regenerates a structurally valid item rejected by the independent answer audit", async () => {
+    vi.stubEnv("NVIDIA_API_KEY", "test-key-only");
+    const source = "The cell membrane controls movement of substances into and out of the cell.";
+    const question = { response_type: "single_best", question_family: "definition", cognitive_demand: "understand",
+      difficulty: "foundational", question: "Which statement describes the cell membrane?",
+      options: ["It controls movement of substances.", "It produces sunlight for the cell.",
+        "It stores every genetic instruction.", "It is a kind of digestive enzyme."],
+      correct_option_ids: [0], selection_count: null,
+      explanation: "The membrane regulates movement across the cell boundary, which is the function stated in the source.",
+      option_explanations: ["Correct because the source states this function.", "Incorrect; this is not a membrane function.",
+        "Incorrect; this describes genetic storage.", "Incorrect; a membrane is not an enzyme."],
+      source_excerpt: "controls movement of substances" };
+    const completion = (content: object) => Response.json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(content) } }] });
+    const fetchMock = vi.fn().mockResolvedValueOnce(completion({ questions: [question] }))
+      .mockResolvedValueOnce(completion({ valid: false, issues: ["The stem is ambiguous."] }))
+      .mockResolvedValueOnce(completion({ questions: [question] }))
+      .mockResolvedValueOnce(completion({ valid: true, issues: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const reserve = vi.fn(async () => {});
+    const result = await generateChunkQuestions(source, ["single_best"], ["definition"], 1, 1, "Cells", reserve);
+    expect(result).toHaveLength(1);
+    expect(reserve).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const retry = JSON.parse(String((fetchMock.mock.calls[2][1] as RequestInit).body));
+    expect(retry.messages[1].content).toContain("The stem is ambiguous.");
   });
 });

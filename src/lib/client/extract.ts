@@ -1,7 +1,8 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { DocumentSection } from "@/lib/shared/types";
 
 export type TextPage = { page: number; text: string };
-export type TextChunk = { startPage: number; endPage: number; text: string; emptyPages: number[] };
+export type TextChunk = { startPage: number; endPage: number; text: string; emptyPages: number[]; section?: DocumentSection };
 
 export const MAX_CHUNK_CHARACTERS = 45_000;
 export const MAX_CHUNKS = 80;
@@ -52,11 +53,33 @@ export function partitionPages(pages: TextPage[]): TextChunk[] {
   return chunks;
 }
 
-export async function extractWholePdf(pdf: PDFDocumentProxy, onProgress: (page: number, total: number) => void,
-  signal?: AbortSignal): Promise<TextChunk[]> {
-  if (pdf.numPages < 1 || pdf.numPages > 5000) throw new Error("This PDF's page count is unsupported.");
+export function partitionSectionPages(pages: TextPage[], sections: DocumentSection[]): TextChunk[] {
+  if (!sections.length || sections[0].startPage !== 1 || sections.at(-1)?.endPage !== pages.length) {
+    throw new Error("Document section coverage is incomplete.");
+  }
   const chunks: TextChunk[] = [];
   let current: TextChunk | null = null;
+  let sectionIndex = 0;
+  for (const page of pages) {
+    while (page.page > sections[sectionIndex].endPage) {
+      if (current) chunks.push(current);
+      current = null; sectionIndex++;
+    }
+    const section = sections[sectionIndex];
+    if (page.page < section.startPage || page.page > section.endPage) throw new Error("Document section coverage is inconsistent.");
+    const next = appendPage(chunks, current, page);
+    next.section = section;
+    current = next;
+  }
+  if (current) chunks.push(current);
+  if (chunks.length > MAX_CHUNKS) throw new Error("This PDF has too many processing segments. No partial artifact was created.");
+  return chunks;
+}
+
+export async function extractTextPages(pdf: PDFDocumentProxy, onProgress: (page: number, total: number) => void,
+  signal?: AbortSignal): Promise<TextPage[]> {
+  if (pdf.numPages < 1 || pdf.numPages > 5000) throw new Error("This PDF's page count is unsupported.");
+  const pages: TextPage[] = [];
   for (let number = 1; number <= pdf.numPages; number++) {
     if (signal?.aborted) throw new Error("Processing stopped.");
     let text: string;
@@ -64,10 +87,14 @@ export async function extractWholePdf(pdf: PDFDocumentProxy, onProgress: (page: 
       const pdfPage = await pdf.getPage(number);
       text = extractPageText((await pdfPage.getTextContent()).items);
     } catch { throw new Error(`Text extraction failed on page ${number}. No partial resource was saved.`); }
-    current = appendPage(chunks, current, { page: number, text });
+    pages.push({ page: number, text });
     onProgress(number, pdf.numPages);
     if (number % 4 === 0) await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
-  if (current) chunks.push(current);
-  return chunks;
+  return pages;
+}
+
+export async function extractWholePdf(pdf: PDFDocumentProxy, onProgress: (page: number, total: number) => void,
+  signal?: AbortSignal): Promise<TextChunk[]> {
+  return partitionPages(await extractTextPages(pdf, onProgress, signal));
 }

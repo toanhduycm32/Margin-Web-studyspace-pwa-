@@ -14,7 +14,7 @@ export type LibraryItem = {
   importedAt?: string;
 };
 
-export type QuizQuestion = {
+export type LegacyQuizQuestion = {
   question: string;
   options: [string, string, string, string];
   answer: number;
@@ -24,8 +24,35 @@ export type QuizQuestion = {
   endPage: number;
 };
 
+export type ResponseType = "single_best" | "select_all" | "select_n";
+export type QuizQuestionV2 = {
+  id: string;
+  responseType: ResponseType;
+  selectionCount: number | null;
+  questionFamily: string;
+  cognitiveDemand: "remember" | "understand" | "apply" | "analyze";
+  difficulty: "foundational" | "intermediate" | "advanced";
+  question: string;
+  options: string[];
+  correctOptionIds: number[];
+  explanation: string;
+  optionExplanations: string[];
+  sourceExcerpt: string;
+  startPage: number;
+  endPage: number;
+};
+export type QuizQuestion = LegacyQuizQuestion | QuizQuestionV2;
+
+export type DocumentSection = {
+  id: string;
+  title: string;
+  startPage: number;
+  endPage: number;
+  source: "outline" | "heading" | "inferred";
+};
+
 export type ArtifactRecord = {
-  schema: 1;
+  schema: 1 | 2;
   id: string;
   documentId: string;
   sourceMd5: string;
@@ -36,22 +63,26 @@ export type ArtifactRecord = {
   readablePages: number;
   emptyPages: number[];
   chunkCount: number;
+  ruleVersion?: string;
+  summaryProfile?: string;
+  sections?: DocumentSection[];
+  assessedSectionIds?: string[];
   payload: { text: string } | { questions: QuizQuestion[] };
 };
 
 export type AttemptRecord = {
-  schema: 1;
+  schema: 1 | 2;
   id: string;
   artifactId: string;
   documentId: string;
   createdAt: string;
-  answers: number[];
+  answers: number[] | number[][];
   score: number;
   questionCount: number;
 };
 
 export type MapRecord = {
-  schema: 2;
+  schema: 2 | 3;
   subject: string;
   kind: "summary" | "quiz";
   documentId: string;
@@ -64,6 +95,12 @@ export type MapRecord = {
   requestedCount: number;
   textHash: string;
   emptyPages: number[];
+  ruleVersion?: string;
+  summaryProfile?: string;
+  section?: DocumentSection;
+  wordTarget?: number;
+  plannedFormats?: ResponseType[];
+  plannedFamilies?: string[];
   digest?: string;
   questions?: QuizQuestion[];
 };

@@ -28,3 +28,7 @@ h1,h2,h3,p{margin-top:0}h1,h2{font-family:Georgia,'Times New Roman',serif;font-w
 .summary-body p{margin:0 0 15px;color:#324336}
 .summary-body ul{margin:0 0 17px;padding-left:23px}
 .summary-body li{margin:0 0 7px;padding-left:2px}
+.question-instruction{margin:-8px 0 14px;color:#5b7160;font-size:.79rem;font-weight:700}
+.quiz-option:focus-within{outline:2px solid #5c9065;outline-offset:2px}
+.quiz-option:has(input[type="checkbox"]) .option-letter{border-radius:5px}
+.option-feedback{display:block;margin-top:6px;color:#526858;font-size:.74rem;line-height:1.5}

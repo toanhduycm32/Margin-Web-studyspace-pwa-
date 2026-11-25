@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createAppData, listAppData } from "./google";
 import { AppError } from "./errors";
 
@@ -46,19 +46,33 @@ async function reserveDailyCall(principal: Principal): Promise<void> {
 }
 
 export async function withAiAdmission<T>(principal: Principal,
-  operation: (reserveCall: () => Promise<void>) => Promise<T>): Promise<T> {
+  operation: (reserveCall: () => Promise<void>) => Promise<T>,
+  context?: { operationId?: string; phase?: string }): Promise<T> {
   const maximum = aiProcessConcurrency();
-  if (activeTotal >= maximum || (activeBySubject.get(principal.sub) || 0) >= 1) {
-    throw new AppError(429, "AI is busy for this account. Wait for the current request to finish.");
+  const account = createHash("sha256").update(principal.sub).digest("hex").slice(0, 12);
+  if ((activeBySubject.get(principal.sub) || 0) >= 1) {
+    console.info("ai_admission", { category: "account_active", account, operationId: context?.operationId, phase: context?.phase });
+    throw new AppError(409, "Another AI request for this account is still running. Wait a moment, then retry.");
   }
+  if (activeTotal >= maximum) {
+    console.info("ai_admission", { category: "process_saturated", account, operationId: context?.operationId, phase: context?.phase });
+    throw new AppError(503, "AI capacity is temporarily full. Your account is ready; retry shortly.");
+  }
+  const started = Date.now();
   activeTotal += 1;
   activeBySubject.set(principal.sub, (activeBySubject.get(principal.sub) || 0) + 1);
   try {
     return await operation(() => reserveDailyCall(principal));
+  } catch (error) {
+    console.warn("ai_admission", { category: error instanceof AppError ? `app_${error.status}` : "unexpected",
+      account, operationId: context?.operationId, phase: context?.phase, elapsedMs: Date.now() - started });
+    throw error;
   } finally {
     activeTotal -= 1;
     const remaining = (activeBySubject.get(principal.sub) || 1) - 1;
     if (remaining) activeBySubject.set(principal.sub, remaining);
     else activeBySubject.delete(principal.sub);
+    console.info("ai_admission", { category: "released", account, operationId: context?.operationId,
+      phase: context?.phase, elapsedMs: Date.now() - started });
   }
 }

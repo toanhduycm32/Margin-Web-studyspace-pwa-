@@ -40,7 +40,7 @@ describe("shared NVIDIA admission", () => {
     });
     await Promise.all([aliceReady, bobReady]);
     await expect(withAiAdmission({ sub: "sub-alice-concurrent", accessToken: "token-alice" }, async () => "again"))
-      .rejects.toMatchObject({ status: 429 });
+      .rejects.toMatchObject({ status: 409 });
     expect(usage.get("token-alice")).toBe(1);
     expect(usage.get("token-bob")).toBe(1);
     expect(new Set(calls)).toEqual(new Set(["token-alice", "token-bob"]));
@@ -74,5 +74,20 @@ describe("shared NVIDIA admission", () => {
     await expect(withAiAdmission(user, async (reserve) => { await reserve(); return "another"; }))
       .rejects.toMatchObject({ status: 429 });
     expect(uploads).toBe(1);
+  });
+
+  it("distinguishes process saturation from another request by the same account", async () => {
+    vi.stubEnv("AI_PROCESS_CONCURRENCY", "1");
+    let release!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const active = withAiAdmission({ sub: "saturated-alice", accessToken: "alice" }, async () => {
+      entered(); return new Promise<string>((resolve) => { release = () => resolve("done"); });
+    });
+    await started;
+    await expect(withAiAdmission({ sub: "saturated-bob", accessToken: "bob" }, async () => "bob"))
+      .rejects.toMatchObject({ status: 503, message: expect.stringContaining("capacity") });
+    release(); expect(await active).toBe("done");
+    expect(await withAiAdmission({ sub: "saturated-bob", accessToken: "bob" }, async () => "bob")).toBe("bob");
   });
 });

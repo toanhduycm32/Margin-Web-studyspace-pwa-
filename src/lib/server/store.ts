@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { AppDataMeta } from "./google";
 import { createAppData, driveFile, findAppData, listAppData, readAppData, updateAppData } from "./google";
 import { AppError } from "./errors";
@@ -84,9 +84,27 @@ export async function saveMap(accessToken: string, name: string, signed: SignedM
     { kind: "map", documentId: signed.map.documentId, sourceMd5: signed.map.sourceMd5 });
 }
 
-export async function saveArtifact(accessToken: string, artifact: Omit<ArtifactRecord, "id" | "createdAt">): Promise<ArtifactRecord> {
-  const full: ArtifactRecord = { ...artifact, id: randomUUID(), createdAt: new Date().toISOString() };
-  await createAppData(accessToken, `artifact-${full.id}.json`, full,
+export async function saveArtifact(accessToken: string, artifact: Omit<ArtifactRecord, "id" | "createdAt">,
+  operationId?: string): Promise<ArtifactRecord> {
+  const hash = operationId ? createHash("sha256").update(operationId).digest("hex") : null;
+  const id = hash ? `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}` : randomUUID();
+  const name = `artifact-${id}.json`;
+  if (operationId) {
+    const existing = await findAppData(accessToken, name);
+    if (existing) {
+      const saved = await readAppData<ArtifactRecord>(accessToken, existing.id);
+      if (saved.id !== id || saved.documentId !== artifact.documentId || saved.sourceMd5 !== artifact.sourceMd5 ||
+          saved.kind !== artifact.kind || saved.ruleVersion !== artifact.ruleVersion ||
+          saved.summaryProfile !== artifact.summaryProfile ||
+          (saved.kind === "quiz" && "questions" in saved.payload && "questions" in artifact.payload &&
+            saved.payload.questions.length !== artifact.payload.questions.length)) {
+        throw new AppError(409, "This operation ID belongs to a different learning resource.");
+      }
+      return saved;
+    }
+  }
+  const full: ArtifactRecord = { ...artifact, id, createdAt: new Date().toISOString() };
+  await createAppData(accessToken, name, full,
     { kind: "artifact", documentId: full.documentId, artifactId: full.id, artifactKind: full.kind,
       sourceMd5: full.sourceMd5 }, `${full.kind === "summary" ? "Summary" : "Quiz"} · ${full.createdAt}`);
   return full;
@@ -113,7 +131,7 @@ export async function getArtifact(accessToken: string, artifactId: string): Prom
   const meta = await findAppData(accessToken, `artifact-${artifactId}.json`);
   if (!meta || meta.appProperties?.kind !== "artifact") throw new AppError(404, "Learning resource not found.");
   const artifact = await readAppData<ArtifactRecord>(accessToken, meta.id);
-  if (artifact.schema !== 1 || artifact.id !== artifactId) throw new AppError(502, "Learning resource is damaged.");
+  if (![1, 2].includes(artifact.schema) || artifact.id !== artifactId) throw new AppError(502, "Learning resource is damaged.");
   return artifact;
 }
 
@@ -128,6 +146,6 @@ export async function listAttempts(accessToken: string, artifactId: string): Pro
   if (!/^[0-9a-f-]{36}$/i.test(artifactId)) throw new AppError(400, "Invalid resource ID.");
   const result = await listAppData(accessToken, { kind: "attempt", artifactId, pageSize: 10, orderBy: "createdTime desc" });
   const records = await Promise.all((result.files || []).map((meta) => readAppData<AttemptRecord>(accessToken, meta.id)));
-  return records.filter((item) => item.schema === 1 && item.artifactId === artifactId)
+  return records.filter((item) => [1, 2].includes(item.schema) && item.artifactId === artifactId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }

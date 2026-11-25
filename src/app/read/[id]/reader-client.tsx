@@ -3,8 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { api } from "@/lib/client/api";
-import { extractWholePdf } from "@/lib/client/extract";
+import { api, ApiError } from "@/lib/client/api";
+import { extractTextPages, partitionSectionPages } from "@/lib/client/extract";
+import { documentSections } from "@/lib/client/structure";
+import { correctOptionIds, responseType } from "@/lib/shared/quiz";
+import { allocateQuizBlueprint, sectionWordTarget, STUDY_RULE_VERSION, SUMMARY_PROFILES, type SummaryProfile } from "@/lib/shared/study-rules";
 import type { ArtifactRecord, AttemptRecord, DocumentRecord, DriveFile, QuizQuestion, SignedMap } from "@/lib/shared/types";
 import PageSurface from "./page-surface";
 import SummaryContent from "./summary-content";
@@ -27,10 +30,11 @@ export default function ReaderClient({ id }: { id: string }) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [artifacts, setArtifacts] = useState<ArtifactItem[]>([]);
   const [active, setActive] = useState<ArtifactRecord | null>(null);
-  const [answers, setAnswers] = useState<number[]>([]);
+  const [answers, setAnswers] = useState<number[][]>([]);
   const [submitted, setSubmitted] = useState<AttemptRecord | null>(null);
   const [previousAttempt, setPreviousAttempt] = useState<AttemptRecord | null>(null);
   const [quizCount, setQuizCount] = useState<5 | 10 | 20 | 30>(10);
+  const [summaryStyle, setSummaryStyle] = useState<SummaryProfile>("academic");
   const [running, setRunning] = useState<Running | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -163,36 +167,70 @@ export default function ReaderClient({ id }: { id: string }) {
   }
 
   async function run(kind: "summary" | "quiz") {
-    if (!pdf || !file?.md5Checksum || running) return;
+    if (!pdf || !file?.md5Checksum || abortRef.current) return;
     const controller = new AbortController(); abortRef.current = controller;
     const requestedCount = kind === "quiz" ? quizCount : 0;
+    const profile = kind === "summary" ? summaryStyle : undefined;
+    const operationKey = `margin-ai-${STUDY_RULE_VERSION}-${id}-${file.md5Checksum}-${kind}-${requestedCount}-${profile || ""}`;
+    const operationId = sessionStorage.getItem(operationKey) || crypto.randomUUID();
+    sessionStorage.setItem(operationKey, operationId);
     setActive(null); setError(""); setNotice(""); setSheetOpen(true);
+    setRunning({ stage: "Preparing your PDF", done: 0, total: 1 });
     try {
       const config = await api<{ missing: string[] }>("/api/config");
       if (config.missing.includes("NVIDIA_API_KEY")) throw new Error("Add NVIDIA_API_KEY to .env.local before using AI.");
       setRunning({ stage: "Reading every page", done: 0, total: pdf.numPages });
-      const chunks = await extractWholePdf(pdf, (done, total) => setRunning({ stage: "Reading every page", done, total }), controller.signal);
+      const pages = await extractTextPages(pdf, (done, total) => setRunning({ stage: "Reading every page", done, total }), controller.signal);
+      const sections = await documentSections(pdf, pages);
+      const chunks = partitionSectionPages(pages, sections);
+      const sectionSizes = new Map(sections.map((section) => [section.id,
+        chunks.filter((chunk) => chunk.section?.id === section.id).reduce((sum, chunk) => sum + chunk.text.length, 0)]));
+      const blueprint = kind === "quiz" ? allocateQuizBlueprint(chunks.map((chunk) => ({
+        sectionId: chunk.section!.id,
+        characters: chunk.text.replace(/^Page \d+\n/gm, "").replace(/\[No extractable text\]/g, "").trim().length < 40
+          ? 0 : chunk.text.length,
+        conceptSignals: (chunk.text.match(/\b(?:means|defined as|because|therefore|assum|theorem|formula|định nghĩa|giả sử)\b/gi) || []).length,
+      })), requestedCount) : [];
       const signed: SignedMap[] = [];
       for (let index = 0; index < chunks.length; index++) {
-        if (controller.signal.aborted) throw new Error("Processing stopped. Completed sections were saved for a later retry.");
-        setRunning({ stage: "Studying the full PDF", done: index, total: chunks.length });
+        if (controller.signal.aborted) throw new Error("Processing stopped. Retry to reuse completed work.");
+        setRunning({ stage: kind === "summary" ? "Writing section summaries" : "Building your assessment", done: index, total: chunks.length });
         const chunk = chunks[index];
-        signed.push(await api<SignedMap>("/api/ai/chunk", { method: "POST", signal: controller.signal,
-          body: JSON.stringify({ kind, documentId: id, sourceMd5: file.md5Checksum,
-            chunkIndex: index, chunkCount: chunks.length, startPage: chunk.startPage, endPage: chunk.endPage,
-            pageCount: pdf.numPages, requestedCount, emptyPages: chunk.emptyPages, text: chunk.text }),
-        }));
+        const sectionSize = sectionSizes.get(chunk.section!.id) || chunk.text.length;
+        const wordTarget = profile ? Math.max(20, Math.round(sectionWordTarget(profile, sectionSize) * chunk.text.length / sectionSize)) : undefined;
+        const body = JSON.stringify({ kind, operationId, documentId: id, sourceMd5: file.md5Checksum,
+          chunkIndex: index, chunkCount: chunks.length, startPage: chunk.startPage, endPage: chunk.endPage,
+          pageCount: pdf.numPages, requestedCount, emptyPages: chunk.emptyPages, text: chunk.text,
+          section: chunk.section, summaryProfile: profile, wordTarget,
+          plannedFormats: kind === "quiz" ? blueprint[index].formats : undefined,
+          plannedFamilies: kind === "quiz" ? blueprint[index].families : undefined });
+        let result: SignedMap | null = null;
+        for (let retry = 0; retry < 4; retry++) {
+          try { result = await api<SignedMap>("/api/ai/chunk", { method: "POST", signal: controller.signal, body }); break; }
+          catch (caught) {
+            if (!(caught instanceof ApiError) || caught.status !== 503 || retry === 3 || controller.signal.aborted) throw caught;
+            await new Promise<void>((resolve, reject) => {
+              const timer = setTimeout(resolve, 800 * 2 ** retry);
+              controller.signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("Processing stopped.")); }, { once: true });
+            });
+          }
+        }
+        if (!result) throw new Error("Processing segment did not complete.");
+        signed.push(result);
       }
-      setRunning({ stage: kind === "summary" ? "Writing your summary" : "Assembling your quiz", done: chunks.length, total: chunks.length });
+      setRunning({ stage: kind === "summary" ? "Saving your summary" : "Saving your quiz", done: chunks.length, total: chunks.length });
       const result = await api<{ artifact: ArtifactRecord }>("/api/ai/finalize", { method: "POST", signal: controller.signal,
-        body: JSON.stringify({ kind, documentId: id, sourceMd5: file.md5Checksum, requestedCount, maps: signed }),
+        body: JSON.stringify({ kind, operationId, documentId: id, sourceMd5: file.md5Checksum, requestedCount,
+          summaryProfile: profile, maps: signed }),
       });
+      sessionStorage.removeItem(operationKey);
       setActive(result.artifact); setAnswers([]); setSubmitted(null); setPreviousAttempt(null);
       let refreshed = true;
       try { await refreshArtifacts(); } catch { refreshed = false; }
       setNotice(refreshed ? `${kind === "summary" ? "Summary" : "Quiz"} saved to your Google Drive.` :
         "Resource saved to Drive. Reopen the PDF to refresh the saved list.");
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Whole-PDF processing failed."); }
+    } catch (caught) { setError(controller.signal.aborted ? "Processing stopped. Start again to reuse completed work." :
+      caught instanceof Error ? caught.message : "Whole-PDF processing failed."); }
     finally { abortRef.current = null; setRunning(null); }
   }
 
@@ -209,6 +247,25 @@ export default function ReaderClient({ id }: { id: string }) {
 
   if (!record || !file) return <main className="reader-loading"><button className="text-link" onClick={() => router.push("/")}>← Library</button><h1>{error || "Opening PDF…"}</h1></main>;
   const questions = active?.kind === "quiz" ? (active.payload as { questions: QuizQuestion[] }).questions : [];
+  const canSubmit = questions.length > 0 && questions.every((question, index) => {
+    const selected = answers[index] || [];
+    return selected.length > 0 && (responseType(question) !== "select_n" ||
+      selected.length === ("selectionCount" in question ? question.selectionCount : 1));
+  });
+  const chooseAnswer = (question: QuizQuestion, questionIndex: number, optionIndex: number) => {
+    setAnswers((old) => {
+      const next = [...old];
+      if (responseType(question) === "single_best") next[questionIndex] = [optionIndex];
+      else {
+        const selected = next[questionIndex] || [];
+        if (selected.includes(optionIndex)) next[questionIndex] = selected.filter((id) => id !== optionIndex);
+        else if (responseType(question) !== "select_n" || selected.length < ("selectionCount" in question ? question.selectionCount! : 1)) {
+          next[questionIndex] = [...selected, optionIndex].sort((a, b) => a - b);
+        }
+      }
+      return next;
+    });
+  };
 
   return <div className="reader-shell"><header className="reader-top"><button className="reader-back" onClick={() => router.push("/")} aria-label="Back to library">← <span>Library</span></button><div className="reader-name" title={file.name}>{file.name}</div><div className="reader-top-actions"><span className="current-page">{currentPage}{pdf ? ` / ${pdf.numPages}` : ""}</span><button className="reader-study" onClick={() => setSheetOpen(true)}>✦ <span>Study</span></button></div></header>
     {notice && <div className="reader-alert notice" role="status">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss notice">×</button></div>}
@@ -216,16 +273,41 @@ export default function ReaderClient({ id }: { id: string }) {
     {!pdf ? <div className="reader-loading-inline">{error ? <button className="button secondary" onClick={() => window.location.reload()}>Retry opening PDF</button> : "Opening the original PDF…"}</div> : <main className="pdf-flow" ref={contentRef}>{Array.from({ length: pdf.numPages }, (_, index) => <PageSurface key={index + 1} pdf={pdf} number={index + 1} width={width} active={near.has(index + 1)} />)}</main>}
     {sheetOpen && <><button className="sheet-backdrop" aria-label="Close study panel" onClick={() => setSheetOpen(false)} /><aside className="study-sheet" aria-label="PDF study tools"><div className="sheet-header"><div><span className="eyebrow">THIS PDF</span><h2>{active ? active.kind === "summary" ? "Summary" : "Practice quiz" : "Study the whole book"}</h2></div><button className="sheet-close" aria-label="Close study panel" onClick={() => setSheetOpen(false)}>×</button></div><div className="sheet-body">
       {error && <div className="alert error" role="alert">{error}<button onClick={() => setError("")} aria-label="Dismiss error">×</button></div>}
-      {running ? <div className="processing"><div className="processing-symbol">✦</div><h3>{running.stage}</h3><p>{running.done} of {running.total} {running.stage === "Reading every page" ? "pages" : "sections"}</p><div className="progress-track"><div style={{ width: `${Math.round(running.done / Math.max(1, running.total) * 100)}%` }} /></div><p className="quiet">You can close this panel and keep reading. Completed sections are saved if processing is interrupted.</p><button className="text-link" onClick={() => abortRef.current?.abort()}>Stop processing</button></div> : active ? <>
+      {running ? <div className="processing"><div className="processing-symbol">✦</div><h3>{running.stage}</h3><p>{running.stage === "Reading every page" ? `${running.done} of ${running.total} pages` : `${Math.round(running.done / Math.max(1, running.total) * 100)}% complete`}</p><div className="progress-track"><div style={{ width: `${Math.round(running.done / Math.max(1, running.total) * 100)}%` }} /></div><p className="quiet">You can close this panel and keep reading. Completed work is saved if processing is interrupted.</p><button className="text-link" onClick={() => abortRef.current?.abort()}>Stop processing</button></div> : active ? <>
         <button className="text-link back-to-tools" onClick={() => { setActive(null); setAnswers([]); setSubmitted(null); }}>← All study tools</button>
         <p className="resource-meta">Created {humanDate(active.createdAt)} · {active.readablePages}/{active.pageCount} pages had extractable text{active.sourceMd5 !== file.md5Checksum ? " · Earlier PDF version" : ""}</p>
         {active.emptyPages.length > 0 && <p className="coverage-warning">Text could not be extracted from {active.emptyPages.length} page{active.emptyPages.length === 1 ? "" : "s"}. Images, diagrams and scans were not interpreted.</p>}
+        {active.kind === "quiz" && active.sections && active.assessedSectionIds && active.assessedSectionIds.length < active.sections.length &&
+          <p className="coverage-warning">This quiz samples {active.assessedSectionIds.length} of {active.sections.length} identified sections. A finite quiz cannot test every concept.</p>}
         {active.kind === "summary" ? <SummaryContent text={(active.payload as { text: string }).text} /> : <div className="quiz-body">{previousAttempt && !submitted && <p className="previous-attempt">Last attempt: {previousAttempt.score}/{previousAttempt.questionCount} · {humanDate(previousAttempt.createdAt)}</p>}
           {submitted && <div className="quiz-score"><strong>{submitted.score}/{submitted.questionCount}</strong><span>correct answers</span></div>}
-          {questions.map((question, index) => <section className="quiz-question" key={index}><div className="question-kicker">QUESTION {index + 1} OF {questions.length} · PAGES {question.startPage}–{question.endPage}</div><h3>{question.question}</h3><div className="quiz-options">{question.options.map((option, optionIndex) => <label key={optionIndex} className={`quiz-option ${answers[index] === optionIndex ? "chosen" : ""} ${submitted && question.answer === optionIndex ? "correct" : ""} ${submitted && answers[index] === optionIndex && question.answer !== optionIndex ? "incorrect" : ""}`}><input type="radio" name={`question-${index}`} checked={answers[index] === optionIndex} disabled={!!submitted} onChange={() => setAnswers((old) => { const copy = [...old]; copy[index] = optionIndex; return copy; })} /><span className="option-letter">{String.fromCharCode(65 + optionIndex)}</span><span>{option}</span></label>)}</div>{submitted && <div className="answer-explanation"><strong>{answers[index] === question.answer ? "Correct" : `Correct answer: ${String.fromCharCode(65 + question.answer)}`}</strong><p>{question.explanation}</p><small>Source: “{question.sourceExcerpt}”</small></div>}</section>)}
-          {!submitted ? <button className="button primary full" onClick={() => void submitQuiz()}>Submit answers</button> : <button className="button secondary full" onClick={() => { setAnswers([]); setSubmitted(null); }}>Try again</button>}
+          {questions.map((question, index) => {
+            const selected = answers[index] || [];
+            const correct = correctOptionIds(question);
+            const format = responseType(question);
+            const isCorrect = selected.length === correct.length && selected.every((id) => correct.includes(id));
+            return <section className="quiz-question" key={"id" in question ? question.id : index}>
+              <div className="question-kicker">QUESTION {index + 1} OF {questions.length} · PAGES {question.startPage}–{question.endPage}</div>
+              <h3>{question.question}</h3>
+              <p className="question-instruction">{format === "single_best" ? "Choose one best answer" : format === "select_n"
+                ? `Select exactly ${"selectionCount" in question ? question.selectionCount : correct.length} answers`
+                : "Select all that apply"}</p>
+              <div className="quiz-options">{question.options.map((option, optionIndex) => <label key={optionIndex}
+                className={`quiz-option ${selected.includes(optionIndex) ? "chosen" : ""} ${submitted && correct.includes(optionIndex) ? "correct" : ""} ${submitted && selected.includes(optionIndex) && !correct.includes(optionIndex) ? "incorrect" : ""}`}>
+                <input type={format === "single_best" ? "radio" : "checkbox"} name={`question-${index}`}
+                  checked={selected.includes(optionIndex)} disabled={!!submitted}
+                  onChange={() => chooseAnswer(question, index, optionIndex)} />
+                <span className="option-letter">{String.fromCharCode(65 + optionIndex)}</span>
+                <span>{option}{submitted && "optionExplanations" in question && <small className="option-feedback">{question.optionExplanations[optionIndex]}</small>}</span>
+              </label>)}</div>
+              {submitted && <div className="answer-explanation"><strong>{isCorrect ? "Correct" :
+                `Correct choices: ${correct.map((id) => String.fromCharCode(65 + id)).join(", ")}`}</strong>
+                <p>{question.explanation}</p><small>Source: “{question.sourceExcerpt}”</small></div>}
+            </section>;
+          })}
+          {!submitted ? <button className="button primary full" onClick={() => void submitQuiz()} disabled={!canSubmit}>Submit answers</button> : <button className="button secondary full" onClick={() => { setAnswers([]); setSubmitted(null); }}>Try again</button>}
         </div>}
-      </> : <><p className="sheet-intro">Choose one action. Margin reads every page automatically, then saves the result beside this PDF.</p><div className="study-actions"><button className="study-action" onClick={() => void run("summary")} disabled={!pdf}><span className="action-glyph">≡</span><span><strong>Summarize PDF</strong><small>Key ideas from the whole document</small></span><b>→</b></button><div className="quiz-choice"><label htmlFor="quiz-count">Practice questions</label><select id="quiz-count" value={quizCount} onChange={(event) => setQuizCount(Number(event.target.value) as 5 | 10 | 20 | 30)}><option value={5}>5 questions</option><option value={10}>10 questions</option><option value={20}>20 questions</option><option value={30}>30 questions</option></select></div><button className="study-action" onClick={() => void run("quiz")} disabled={!pdf}><span className="action-glyph">?</span><span><strong>Generate quiz</strong><small>Practice across the entire PDF</small></span><b>→</b></button></div><p className="privacy-note">Extracted PDF text is sent to NVIDIA when you start an action. Scanned pages and visual content may be missed.</p><div className="saved-heading"><h3>Saved for this PDF</h3><span>{artifacts.length}</span></div>{artifacts.length ? <div className="saved-list">{artifacts.map((item) => <button key={item.id} className="saved-row" onClick={() => void openArtifact(item.id)}><span>{item.kind === "summary" ? "≡" : "?"}</span><div><strong>{item.kind === "summary" ? "Summary" : "Practice quiz"}</strong><small>{item.createdAt ? humanDate(item.createdAt) : "Saved"}{item.sourceMd5 !== file.md5Checksum ? " · Earlier PDF version" : ""}</small></div><b>→</b></button>)}</div> : <p className="quiet">Your summaries and quizzes will appear here.</p>}</>}
+      </> : <><p className="sheet-intro">Choose one action. Margin reads every page automatically, then saves the result beside this PDF.</p><div className="study-actions"><div className="quiz-choice"><label htmlFor="summary-style">Summary style</label><select id="summary-style" value={summaryStyle} onChange={(event) => setSummaryStyle(event.target.value as SummaryProfile)}>{Object.entries(SUMMARY_PROFILES).map(([id, rule]) => <option key={id} value={id}>{rule.label}</option>)}</select></div><button className="study-action" onClick={() => void run("summary")} disabled={!pdf}><span className="action-glyph">≡</span><span><strong>Summarize PDF</strong><small>Section by section, across the whole document</small></span><b>→</b></button><div className="quiz-choice"><label htmlFor="quiz-count">Practice questions</label><select id="quiz-count" value={quizCount} onChange={(event) => setQuizCount(Number(event.target.value) as 5 | 10 | 20 | 30)}><option value={5}>5 questions</option><option value={10}>10 questions</option><option value={20}>20 questions</option><option value={30}>30 questions</option></select></div><button className="study-action" onClick={() => void run("quiz")} disabled={!pdf}><span className="action-glyph">?</span><span><strong>Generate quiz</strong><small>Varied questions across the PDF</small></span><b>→</b></button></div><p className="privacy-note">Extracted PDF text is sent to NVIDIA when you start an action. Scanned pages and visual content may be missed.</p><div className="saved-heading"><h3>Saved for this PDF</h3><span>{artifacts.length}</span></div>{artifacts.length ? <div className="saved-list">{artifacts.map((item) => <button key={item.id} className="saved-row" onClick={() => void openArtifact(item.id)}><span>{item.kind === "summary" ? "≡" : "?"}</span><div><strong>{item.kind === "summary" ? "Summary" : "Practice quiz"}</strong><small>{item.createdAt ? humanDate(item.createdAt) : "Saved"}{item.sourceMd5 !== file.md5Checksum ? " · Earlier PDF version" : ""}</small></div><b>→</b></button>)}</div> : <p className="quiet">Your summaries and quizzes will appear here.</p>}</>}
     </div></aside></>}
   </div>;
 }

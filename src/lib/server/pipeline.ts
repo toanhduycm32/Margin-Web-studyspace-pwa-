@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import type { MapRecord, SignedMap } from "@/lib/shared/types";
+import type { DocumentSection, MapRecord, ResponseType, SignedMap } from "@/lib/shared/types";
 import { selectCoveredQuestions } from "@/lib/shared/quiz";
+import { QUESTION_FAMILIES, STUDY_RULE_VERSION, responseTargets, summaryProfile, type SummaryProfile } from "@/lib/shared/study-rules";
 import { signMap, verifyMap } from "./crypto";
 import { AppError } from "./errors";
-import { summarizeChunk, generateChunkQuestions, synthesizeSummary, modelName } from "./nvidia";
+import { summarizeChunk, generateChunkQuestions, modelName } from "./nvidia";
 import { checkedPdf, getDocumentRecord, getMap, saveArtifact, saveMap } from "./store";
 import { withAiAdmission } from "./ai-admission";
 
@@ -11,6 +12,7 @@ export type AiPrincipal = { sub: string; accessToken: string };
 
 export type ChunkInput = {
   kind: "summary" | "quiz";
+  operationId: string;
   documentId: string;
   sourceMd5: string;
   chunkIndex: number;
@@ -21,12 +23,26 @@ export type ChunkInput = {
   requestedCount: number;
   emptyPages: number[];
   text: string;
+  section: DocumentSection;
+  summaryProfile?: SummaryProfile;
+  wordTarget?: number;
+  plannedFormats?: ResponseType[];
+  plannedFamilies?: string[];
 };
 
 const quizCounts = new Set([5, 10, 20, 30]);
+const operationPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function validSection(section: DocumentSection | undefined, pageCount: number, startPage: number, endPage: number): boolean {
+  return !!section && /^section-\d{1,3}$/.test(section.id) && typeof section.title === "string" &&
+    section.title.length >= 3 && section.title.length <= 110 &&
+    ["outline", "heading", "inferred"].includes(section.source) &&
+    Number.isInteger(section.startPage) && Number.isInteger(section.endPage) && section.startPage >= 1 &&
+    section.endPage <= pageCount && section.startPage <= startPage && section.endPage >= endPage;
+}
 
 function validChunk(input: ChunkInput): void {
-  if (!input || !["summary", "quiz"].includes(input.kind) ||
+  if (!input || !["summary", "quiz"].includes(input.kind) || !operationPattern.test(input.operationId || "") ||
       typeof input.documentId !== "string" || typeof input.sourceMd5 !== "string" ||
       !/^[a-f0-9]{32}$/i.test(input.sourceMd5) || typeof input.text !== "string" ||
       input.text.length > 50_000 || !Number.isInteger(input.chunkCount) || input.chunkCount < 1 || input.chunkCount > 80 ||
@@ -34,53 +50,104 @@ function validChunk(input: ChunkInput): void {
       !Number.isInteger(input.pageCount) || input.pageCount < 1 || input.pageCount > 5000 ||
       !Number.isInteger(input.startPage) || !Number.isInteger(input.endPage) || input.startPage < 1 ||
       input.endPage < input.startPage || input.endPage > input.pageCount ||
+      !validSection(input.section, input.pageCount, input.startPage, input.endPage) ||
       !Array.isArray(input.emptyPages) || input.emptyPages.some((page) => !Number.isInteger(page) || page < input.startPage || page > input.endPage) ||
-      (input.kind === "summary" && input.requestedCount !== 0) ||
-      (input.kind === "quiz" && !quizCounts.has(input.requestedCount))) {
-    throw new AppError(400, "Invalid whole-PDF processing chunk.");
+      (input.kind === "summary" && (input.requestedCount !== 0 || !Number.isInteger(input.wordTarget) ||
+        (input.wordTarget || 0) < 20 || (input.wordTarget || 0) > 1000)) ||
+      (input.kind === "quiz" && (!quizCounts.has(input.requestedCount) ||
+        !Array.isArray(input.plannedFormats) || !Array.isArray(input.plannedFamilies) ||
+        input.plannedFormats.length !== input.plannedFamilies.length || input.plannedFormats.length > 30 ||
+        input.plannedFormats.some((type) => !["single_best", "select_all", "select_n"].includes(type)) ||
+        input.plannedFamilies.some((family) => !QUESTION_FAMILIES.includes(family as typeof QUESTION_FAMILIES[number]))))) {
+    throw new AppError(400, "Invalid whole-PDF processing segment.");
+  }
+  if (input.kind === "summary") {
+    try { summaryProfile(input.summaryProfile); } catch { throw new AppError(400, "Choose a valid summary style."); }
   }
 }
 
-export async function processChunk(principal: AiPrincipal, input: ChunkInput): Promise<SignedMap> {
+function mapIdentity(input: ChunkInput, textHash: string): string {
+  return createHash("sha256").update(JSON.stringify({ textHash, rule: STUDY_RULE_VERSION, kind: input.kind,
+    section: input.section, summaryProfile: input.summaryProfile, wordTarget: input.wordTarget,
+    plannedFormats: input.plannedFormats, plannedFamilies: input.plannedFamilies })).digest("hex").slice(0, 20);
+}
+
+export async function processChunk(principal: AiPrincipal, input: ChunkInput, signal?: AbortSignal): Promise<SignedMap> {
   validChunk(input);
   const { accessToken, sub } = principal;
   await getDocumentRecord(accessToken, input.documentId);
   const file = await checkedPdf(accessToken, input.documentId);
   if (file.md5Checksum !== input.sourceMd5) throw new AppError(409, "PDF changed during processing. Reopen it and start again.");
   const textHash = createHash("sha256").update(input.text).digest("hex");
-  const name = `map-v2-${input.kind}-${input.documentId}-${input.sourceMd5}-${input.requestedCount}-${input.chunkIndex}-${textHash.slice(0, 16)}.json`;
+  const identity = mapIdentity(input, textHash);
+  const name = `map-v3-${input.kind}-${input.documentId}-${input.sourceMd5}-${input.requestedCount}-${input.chunkIndex}-${identity}.json`;
   const previous = await getMap(accessToken, name);
   if (previous) {
-    if (!verifyMap(previous.map, previous.signature) || previous.map.schema !== 2 || previous.map.subject !== sub ||
-        previous.map.textHash !== textHash ||
-        previous.map.kind !== input.kind || previous.map.documentId !== input.documentId ||
-        previous.map.sourceMd5 !== input.sourceMd5 || previous.map.chunkIndex !== input.chunkIndex ||
-        previous.map.chunkCount !== input.chunkCount || previous.map.startPage !== input.startPage ||
-        previous.map.endPage !== input.endPage || previous.map.pageCount !== input.pageCount ||
-        previous.map.requestedCount !== input.requestedCount ||
-        JSON.stringify(previous.map.emptyPages) !== JSON.stringify([...new Set(input.emptyPages)].sort((a, b) => a - b))) {
-      throw new AppError(502, "Saved processing chunk failed integrity validation.");
+    const map = previous.map;
+    if (!verifyMap(map, previous.signature) || map.schema !== 3 || map.subject !== sub ||
+        map.textHash !== textHash || map.ruleVersion !== STUDY_RULE_VERSION || map.kind !== input.kind ||
+        map.documentId !== input.documentId || map.sourceMd5 !== input.sourceMd5 ||
+        map.chunkIndex !== input.chunkIndex || map.chunkCount !== input.chunkCount ||
+        map.startPage !== input.startPage || map.endPage !== input.endPage || map.pageCount !== input.pageCount ||
+        map.requestedCount !== input.requestedCount || map.summaryProfile !== input.summaryProfile ||
+        map.wordTarget !== input.wordTarget || JSON.stringify(map.section) !== JSON.stringify(input.section) ||
+        JSON.stringify(map.plannedFormats || []) !== JSON.stringify(input.plannedFormats || []) ||
+        JSON.stringify(map.plannedFamilies || []) !== JSON.stringify(input.plannedFamilies || []) ||
+        JSON.stringify(map.emptyPages) !== JSON.stringify([...new Set(input.emptyPages)].sort((a, b) => a - b))) {
+      throw new AppError(502, "Saved processing segment failed integrity validation.");
     }
     return previous;
   }
-  const map: MapRecord = { schema: 2, subject: sub, kind: input.kind, documentId: input.documentId,
+  const map: MapRecord = { schema: 3, subject: sub, kind: input.kind, documentId: input.documentId,
     sourceMd5: input.sourceMd5, chunkIndex: input.chunkIndex, chunkCount: input.chunkCount,
     startPage: input.startPage, endPage: input.endPage, pageCount: input.pageCount,
-    requestedCount: input.requestedCount, textHash, emptyPages: [...new Set(input.emptyPages)].sort((a, b) => a - b) };
-  if (map.emptyPages.length === map.endPage - map.startPage + 1 || input.text.trim().length < 40) {
-    if (map.emptyPages.length !== map.endPage - map.startPage + 1) {
-      throw new AppError(422, "This PDF section has too little extractable text.");
-    }
-    if (input.kind === "summary") map.digest = "These pages contain no extractable text. Their visual content was not interpreted.";
+    requestedCount: input.requestedCount, textHash, emptyPages: [...new Set(input.emptyPages)].sort((a, b) => a - b),
+    ruleVersion: STUDY_RULE_VERSION, summaryProfile: input.summaryProfile, section: input.section,
+    wordTarget: input.wordTarget, plannedFormats: input.plannedFormats, plannedFamilies: input.plannedFamilies };
+  if (map.emptyPages.length === map.endPage - map.startPage + 1) {
+    if (input.kind === "summary") map.digest = "No extractable text was available for these pages; visual content was not interpreted.";
+    else map.questions = [];
+  } else if (input.text.replace(/^Page \d+\n/gm, "").replace(/\[No extractable text\]/g, "").trim().length < 40) {
+    if (input.kind === "summary") map.digest = `Only limited text could be extracted from these pages: ${input.text.replace(/^Page \d+\n/gm, "").replace(/\[No extractable text\]/g, "").trim()}. No further interpretation was generated.`;
+    else if (input.plannedFormats!.length) throw new AppError(422, "This PDF section has too little text for reliable questions.");
     else map.questions = [];
   } else if (input.kind === "summary") {
-    map.digest = await withAiAdmission(principal, (reserve) =>
-      summarizeChunk(input.text, input.startPage, input.endPage, reserve));
-  } else {
-    const candidates = Math.min(30, Math.max(2, Math.ceil(input.requestedCount / input.chunkCount) + 1));
-    map.questions = await withAiAdmission(principal, (reserve) =>
-      generateChunkQuestions(input.text, candidates, input.startPage, input.endPage, reserve));
-  }
+    map.digest = await withAiAdmission(principal, (reserve) => summarizeChunk(input.text, input.startPage,
+      input.endPage, input.summaryProfile!, input.section.title, input.section.source, input.wordTarget!, reserve, signal),
+    { operationId: input.operationId, phase: "summary_segment" });
+  } else if (input.plannedFormats!.length) {
+    map.questions = await withAiAdmission(principal, async (reserve) => {
+      const questions: NonNullable<MapRecord["questions"]> = [];
+      for (let offset = 0; offset < input.plannedFormats!.length; offset += 5) {
+        if (signal?.aborted) throw new AppError(499, "Processing stopped. Retry to reuse completed work.");
+        const formats = input.plannedFormats!.slice(offset, offset + 5);
+        const families = input.plannedFamilies!.slice(offset, offset + 5);
+        const batchName = name.replace(/\.json$/, `-batch-${offset}.json`);
+        const saved = await getMap(accessToken, batchName);
+        if (saved) {
+          if (!verifyMap(saved.map, saved.signature) || saved.map.schema !== 3 || saved.map.subject !== sub ||
+              saved.map.ruleVersion !== STUDY_RULE_VERSION || saved.map.textHash !== textHash ||
+              saved.map.documentId !== input.documentId || saved.map.sourceMd5 !== input.sourceMd5 ||
+              saved.map.startPage !== input.startPage || saved.map.endPage !== input.endPage ||
+              JSON.stringify(saved.map.section) !== JSON.stringify(input.section) ||
+              JSON.stringify(saved.map.plannedFormats) !== JSON.stringify(formats) ||
+              JSON.stringify(saved.map.plannedFamilies) !== JSON.stringify(families) ||
+              saved.map.questions?.length !== formats.length) {
+            throw new AppError(502, "Saved assessment batch failed integrity validation.");
+          }
+          questions.push(...saved.map.questions!);
+          continue;
+        }
+        const generated = await generateChunkQuestions(input.text, formats, families,
+          input.startPage, input.endPage, input.section.title, reserve, signal);
+        const batchMap: MapRecord = { ...map, plannedFormats: formats, plannedFamilies: families, questions: generated };
+        await saveMap(accessToken, batchName, { map: batchMap, signature: signMap(batchMap) });
+        questions.push(...generated);
+      }
+      return questions.map((question, index) => ({ ...question, id: `${input.startPage}-${input.endPage}-${index + 1}` }));
+    }, { operationId: input.operationId, phase: "quiz_segment" });
+  } else map.questions = [];
+  if (signal?.aborted) throw new AppError(499, "Processing stopped. Retry to reuse completed work.");
   const signed = { map, signature: signMap(map) };
   await saveMap(accessToken, name, signed);
   return signed;
@@ -88,20 +155,26 @@ export async function processChunk(principal: AiPrincipal, input: ChunkInput): P
 
 export type FinalizeInput = {
   kind: "summary" | "quiz";
+  operationId: string;
   documentId: string;
   sourceMd5: string;
   requestedCount: number;
+  summaryProfile?: SummaryProfile;
   maps: SignedMap[];
 };
 
 export async function finalize(principal: AiPrincipal, input: FinalizeInput) {
   const { accessToken, sub } = principal;
-  if (!input || !["summary", "quiz"].includes(input.kind) || typeof input.documentId !== "string" ||
-      typeof input.sourceMd5 !== "string" || !/^[a-f0-9]{32}$/i.test(input.sourceMd5) ||
-      !Array.isArray(input.maps) || input.maps.length < 1 || input.maps.length > 80 ||
+  if (!input || !["summary", "quiz"].includes(input.kind) || !operationPattern.test(input.operationId || "") ||
+      typeof input.documentId !== "string" || typeof input.sourceMd5 !== "string" ||
+      !/^[a-f0-9]{32}$/i.test(input.sourceMd5) || !Array.isArray(input.maps) ||
+      input.maps.length < 1 || input.maps.length > 80 ||
       (input.kind === "summary" && input.requestedCount !== 0) ||
       (input.kind === "quiz" && !quizCounts.has(input.requestedCount))) {
     throw new AppError(400, "Invalid whole-PDF completion request.");
+  }
+  if (input.kind === "summary") {
+    try { summaryProfile(input.summaryProfile); } catch { throw new AppError(400, "Choose a valid summary style."); }
   }
   await getDocumentRecord(accessToken, input.documentId);
   const file = await checkedPdf(accessToken, input.documentId);
@@ -113,30 +186,57 @@ export async function finalize(principal: AiPrincipal, input: FinalizeInput) {
     return item.map;
   }).sort((a, b) => a.chunkIndex - b.chunkIndex);
   const pageCount = maps[0].pageCount;
-  if (maps.length !== maps[0].chunkCount || maps[0].startPage !== 1 || maps[maps.length - 1].endPage !== pageCount) {
+  if (maps.length !== maps[0].chunkCount || maps[0].startPage !== 1 || maps.at(-1)!.endPage !== pageCount) {
     throw new AppError(400, "PDF processing is incomplete.");
   }
   for (let index = 0; index < maps.length; index++) {
     const map = maps[index];
-    if (map.schema !== 2 || map.subject !== sub || map.kind !== input.kind || map.documentId !== input.documentId ||
-        map.sourceMd5 !== input.sourceMd5 || map.requestedCount !== input.requestedCount ||
+    if (map.schema !== 3 || map.ruleVersion !== STUDY_RULE_VERSION || map.subject !== sub ||
+        map.kind !== input.kind || map.documentId !== input.documentId || map.sourceMd5 !== input.sourceMd5 ||
+        map.requestedCount !== input.requestedCount || map.summaryProfile !== input.summaryProfile ||
         map.chunkIndex !== index || map.chunkCount !== maps.length || map.pageCount !== pageCount ||
         (index > 0 && map.startPage !== maps[index - 1].endPage + 1) ||
+        !validSection(map.section, pageCount, map.startPage, map.endPage) ||
         map.emptyPages.some((page) => page < map.startPage || page > map.endPage)) {
       throw new AppError(400, "PDF processing coverage is inconsistent.");
     }
   }
   const emptyPages = [...new Set(maps.flatMap((map) => map.emptyPages))].sort((a, b) => a - b);
   if (emptyPages.length === pageCount) throw new AppError(422, "No readable PDF text was found. OCR is needed.");
-  const common = { schema: 1 as const, documentId: input.documentId, sourceMd5: input.sourceMd5,
-    model: modelName(), pageCount, readablePages: pageCount - emptyPages.length,
-    emptyPages, chunkCount: maps.length };
+  const sections: DocumentSection[] = [];
+  for (const map of maps) {
+    if (!sections.some((item) => item.id === map.section!.id)) sections.push(map.section!);
+  }
+  for (let index = 0; index < sections.length; index++) {
+    const section = sections[index];
+    if (section.startPage !== (index ? sections[index - 1].endPage + 1 : 1) ||
+        section.endPage !== (index === sections.length - 1 ? pageCount : sections[index + 1].startPage - 1)) {
+      throw new AppError(400, "Document sections do not cover the full PDF.");
+    }
+  }
+  const common = { schema: 2 as const, documentId: input.documentId, sourceMd5: input.sourceMd5,
+    model: modelName(), pageCount, readablePages: pageCount - emptyPages.length, emptyPages,
+    chunkCount: maps.length, ruleVersion: STUDY_RULE_VERSION, sections };
   if (input.kind === "summary") {
-    if (maps.some((map) => !map.digest)) throw new AppError(400, "Summary digest is missing.");
-    const text = await withAiAdmission(principal, (reserve) => synthesizeSummary(maps.map((map) => ({ startPage: map.startPage,
-      endPage: map.endPage, digest: map.digest! })), pageCount, emptyPages, reserve));
-    return saveArtifact(accessToken, { ...common, kind: "summary", payload: { text } });
+    if (maps.some((map) => !map.digest)) throw new AppError(400, "Section summary is missing.");
+    const paragraphs = sections.map((section) => {
+      const content = maps.filter((map) => map.section!.id === section.id).map((map) => map.digest!.trim()).join("\n\n");
+      return `## ${section.title} · pages ${section.startPage}–${section.endPage}\n\n${content}`;
+    });
+    const note = emptyPages.length ? `\n\nText extraction found no readable text on ${emptyPages.length} page(s): ${emptyPages.join(", ")}. Scans, diagrams and other visual material were not interpreted.` : "";
+    const text = `${paragraphs.join("\n\n")}\n\n${note}`.trim();
+    return saveArtifact(accessToken, { ...common, kind: "summary", summaryProfile: input.summaryProfile,
+      payload: { text } }, input.operationId);
   }
   const questions = selectCoveredQuestions(maps, input.requestedCount);
-  return saveArtifact(accessToken, { ...common, kind: "quiz", payload: { questions } });
+  if (questions.length !== input.requestedCount) throw new AppError(502, "Assessment is incomplete. Retry to reuse completed work.");
+  const expected = responseTargets(input.requestedCount);
+  for (const format of ["single_best", "select_all", "select_n"] as const) {
+    if (questions.filter((question) => "responseType" in question && question.responseType === format).length !==
+        expected.filter((item) => item === format).length) {
+      throw new AppError(400, "Assessment response-format blueprint is inconsistent.");
+    }
+  }
+  const assessedSectionIds = [...new Set(maps.filter((map) => (map.questions || []).length > 0).map((map) => map.section!.id))];
+  return saveArtifact(accessToken, { ...common, kind: "quiz", assessedSectionIds, payload: { questions } }, input.operationId);
 }
