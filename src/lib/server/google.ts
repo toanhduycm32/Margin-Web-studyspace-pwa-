@@ -97,13 +97,14 @@ export type AppDataMeta = {
 
 function quote(value: string): string { return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`; }
 
-export async function listAppData(accessToken: string, filters: { kind?: string; name?: string; documentId?: string; artifactId?: string; pageToken?: string; pageSize?: number; orderBy?: string } = {}) {
+export async function listAppData(accessToken: string, filters: { kind?: string; name?: string; documentId?: string; artifactId?: string; quotaDay?: string; pageToken?: string; pageSize?: number; orderBy?: string } = {}) {
   const url = new URL("https://www.googleapis.com/drive/v3/files");
   url.searchParams.set("spaces", "appDataFolder");
   const clauses = ["trashed = false", "appProperties has { key='app' and value='margin-v1' }"];
   if (filters.kind) clauses.push(`appProperties has { key='kind' and value=${quote(filters.kind)} }`);
   if (filters.documentId) clauses.push(`appProperties has { key='documentId' and value=${quote(filters.documentId)} }`);
   if (filters.artifactId) clauses.push(`appProperties has { key='artifactId' and value=${quote(filters.artifactId)} }`);
+  if (filters.quotaDay) clauses.push(`appProperties has { key='quotaDay' and value=${quote(filters.quotaDay)} }`);
   if (filters.name) clauses.push(`name = ${quote(filters.name)}`);
   url.searchParams.set("q", clauses.join(" and "));
   url.searchParams.set("fields", "nextPageToken,files(id,name,description,modifiedTime,appProperties)");

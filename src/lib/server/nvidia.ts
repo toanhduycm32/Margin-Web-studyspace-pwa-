@@ -6,9 +6,11 @@ const endpoint = "https://integrate.api.nvidia.com/v1/chat/completions";
 
 export function modelName(): string { return process.env.NVIDIA_MODEL || "nvidia/nemotron-3.5-lightning-30b-a3b"; }
 
-async function callNvidia(prompt: string, maxTokens: number, reasoningBudget: number): Promise<string> {
+async function callNvidia(prompt: string, maxTokens: number, reasoningBudget: number,
+  reserveCall: () => Promise<void>): Promise<string> {
   const key = process.env.NVIDIA_API_KEY;
   if (!key) throw new AppError(503, "NVIDIA_API_KEY is not configured.");
+  await reserveCall();
   const response = await fetch(endpoint, {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({ model: modelName(), messages: [
@@ -40,10 +42,11 @@ function parseObject(raw: string): Record<string, unknown> {
   } catch { throw new AppError(502, "NVIDIA returned malformed structured output."); }
 }
 
-export async function summarizeChunk(source: string, start: number, end: number): Promise<string> {
+export async function summarizeChunk(source: string, start: number, end: number,
+  reserveCall: () => Promise<void>): Promise<string> {
   const prompt = `Create a compact but information-dense study digest (300–900 characters) of PDF pages ${start}–${end}. Preserve distinct concepts, definitions, mechanisms, formulas when represented in text, and limitations. Do not invent page content. Return only JSON: {"digest":"..."}.\n\n<untrusted_pdf_text>\n${source}\n</untrusted_pdf_text>`;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const raw = await callNvidia(prompt, 10000, 4096);
+    const raw = await callNvidia(prompt, 10000, 4096, reserveCall);
     try {
       const parsed = parseObject(raw);
       if (typeof parsed.digest !== "string" || parsed.digest.trim().length < 100 || parsed.digest.length > 1800) {
@@ -55,10 +58,11 @@ export async function summarizeChunk(source: string, start: number, end: number)
   throw new AppError(502, "Digest generation failed.");
 }
 
-export async function generateChunkQuestions(source: string, count: number, start: number, end: number): Promise<QuizQuestion[]> {
+export async function generateChunkQuestions(source: string, count: number, start: number, end: number,
+  reserveCall: () => Promise<void>): Promise<QuizQuestion[]> {
   const prompt = `Create exactly ${count} distinct educational multiple-choice questions from PDF pages ${start}–${end}. Each question must have four different options, exactly one correct answer, a clear explanation, and an exact contiguous source_excerpt of at least 8 characters copied from the text. Cover different concepts in these pages. Return only JSON: {"questions":[{"question":"...","options":["...","...","...","..."],"answer":0,"explanation":"...","source_excerpt":"..."}]}. The answer is a zero-based option index.\n\n<untrusted_pdf_text>\n${source}\n</untrusted_pdf_text>`;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const raw = await callNvidia(prompt, 16000, 4096);
+    const raw = await callNvidia(prompt, 16000, 4096, reserveCall);
     try {
       const parsed = parseObject(raw);
       return validateQuestions(parsed.questions, source, count, start, end);
@@ -68,11 +72,11 @@ export async function generateChunkQuestions(source: string, count: number, star
 }
 
 export async function synthesizeSummary(digests: Array<{ startPage: number; endPage: number; digest: string }>,
-  pageCount: number, emptyPages: number[]): Promise<string> {
+  pageCount: number, emptyPages: number[], reserveCall: () => Promise<void>): Promise<string> {
   const source = digests.map((item) => `Pages ${item.startPage}–${item.endPage}: ${item.digest}`).join("\n\n");
   const missing = emptyPages.length ? `Pages with no extractable text: ${emptyPages.join(", ")}. Do not claim to understand their visual content.` : "";
   const prompt = `Write a clear, source-grounded study summary of the entire ${pageCount}-page PDF from the complete ordered set of segment digests below. Cover the beginning, middle, and end; preserve important definitions, relationships, arguments, mechanisms, and limits. Treat the digests as incomplete representations of the original PDF and state material extraction gaps. ${missing} Do not invent facts or page references. Use useful headings and concise paragraphs.\n\n<untrusted_segment_digests>\n${source}\n</untrusted_segment_digests>`;
-  const result = await callNvidia(prompt, 16000, 8192);
+  const result = await callNvidia(prompt, 16000, 8192, reserveCall);
   if (result.length < 200 || result.length > 80_000) throw new AppError(502, "NVIDIA returned an unusable whole-PDF summary.");
   return result;
 }

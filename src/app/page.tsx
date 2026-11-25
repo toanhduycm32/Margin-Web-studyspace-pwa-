@@ -46,7 +46,9 @@ export default function Home() {
     void load();
     const outcome = new URLSearchParams(window.location.search).get("auth");
     if (outcome) {
-      setNotice(outcome === "connected" ? "Google Drive connected." : "Google connection did not complete. Check the account and try again.");
+      setNotice(outcome === "connected" ? "Your Google Drive is connected." : outcome === "not-authorized" ?
+        "This Google account is not on Margin's access list. Ask the app administrator to add it." :
+        "Google connection did not complete. Check the account and try again.");
       window.history.replaceState({}, "", window.location.pathname);
     }
     return () => { cancelled = true; };
@@ -110,11 +112,11 @@ export default function Home() {
 
   if (auth === "loading") return <main className="center-screen"><div className="mark small">M</div><p>Opening Margin…</p></main>;
   if (auth === "setup") return <main className="center-screen setup-screen"><div className="mark">M</div><h1>Finish the connection.</h1><p>Add the following values to <code>.env.local</code>, then restart the app.</p><ul>{missing.map((name) => <li key={name}>{name}</li>)}</ul><p className="quiet">The setup guide is in README.md. Keep secret values out of chat and source control.</p></main>;
-  if (auth === "signed-out") return <main className="welcome"><div className="welcome-inner"><div className="wordmark"><span className="mark small">M</span>Margin</div><div className="welcome-copy"><span className="eyebrow">YOUR READING SPACE</span><h1>Read deeply.<br/>Remember more.</h1><p>Your PDFs stay in Google Drive. Read them here and turn the whole document into summaries and practice questions.</p><button className="button primary" onClick={() => void connect()} disabled={!!busy}>{busy === "connect" ? "Connecting…" : "Continue with Google"}</button>{notice && <p className="inline-notice">{notice}</p>}{error && <p className="inline-error" role="alert">{error}</p>}</div><div className="welcome-foot">A quieter way to study.</div></div></main>;
+  if (auth === "signed-out") return <main className="welcome"><div className="welcome-inner"><div className="wordmark"><span className="mark small">M</span>Margin</div><div className="welcome-copy"><span className="eyebrow">YOUR READING SPACE</span><h1>Read deeply.<br/>Remember more.</h1><p>Your PDFs stay in your own Google Drive. Read them here and turn the whole document into summaries and practice questions. Each authorized account has its own private library.</p><button className="button primary" onClick={() => void connect()} disabled={!!busy}>{busy === "connect" ? "Connecting…" : "Continue with Google"}</button>{notice && <p className="inline-notice">{notice}</p>}{error && <p className="inline-error" role="alert">{error}</p>}</div><div className="welcome-foot">A quieter way to study.</div></div></main>;
 
   const filtered = documents.filter((item) => item.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
   const pickerMissing = missing.includes("NEXT_PUBLIC_GOOGLE_PICKER_API_KEY") || missing.includes("NEXT_PUBLIC_GOOGLE_APP_ID");
-  return <div className="library-shell"><header className="library-header"><div className="wordmark"><span className="mark small">M</span>Margin</div><button className="account-button" onClick={() => void disconnect()} disabled={!!busy} title={email}>{email}<span>Disconnect</span></button></header><main className="library-main">
+  return <div className="library-shell"><header className="library-header"><div className="wordmark"><span className="mark small">M</span>Margin</div><button className="account-button" onClick={() => void disconnect()} disabled={!!busy} title={`Private Drive for ${email}`}>{email}<span>Disconnect</span></button></header><main className="library-main">
     {error && <div className="alert error" role="alert">{error}<button onClick={() => setError("")} aria-label="Dismiss error">×</button></div>}
     {notice && <div className="alert notice" role="status">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss notice">×</button></div>}
     <div className="library-heading"><div><span className="eyebrow">LIBRARY</span><h1>Your PDFs</h1><p>Open a document and pick up where you left off.</p></div><button className="button primary add-pdf" onClick={() => void pickPdf()} disabled={!!busy || pickerMissing}>{busy === "picker" ? "Opening…" : busy === "import" ? "Adding…" : "＋ Add PDF"}</button></div>

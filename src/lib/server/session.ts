@@ -1,4 +1,4 @@
-import { appOrigin, ownerEmail } from "./config";
+import { appOrigin, isAuthorizedEmail } from "./config";
 import { seal, unseal } from "./crypto";
 import { AppError, failure } from "./errors";
 import { refreshAccessToken } from "./google";
@@ -45,8 +45,11 @@ export async function readSession(request: Request): Promise<{ session: Session;
   const value = cookieValue(request, SESSION_COOKIE);
   if (!value) throw new AppError(401, "Connect your Google account first.");
   const session = unseal<Session>(value);
+  const connectedAt = Date.parse(session?.connectedAt || "");
   if (!session || !session.sub || !session.email || !session.refreshToken || !session.accessToken ||
-      !Number.isFinite(session.expiresAt) || session.email.toLowerCase() !== ownerEmail()) {
+      !Number.isFinite(session.expiresAt) || !Number.isFinite(connectedAt) ||
+      connectedAt > Date.now() + 300_000 || Date.now() - connectedAt > 30 * 24 * 60 * 60 * 1000 ||
+      !isAuthorizedEmail(session.email)) {
     throw new AppError(401, "Session is invalid. Connect again.");
   }
   if (session.expiresAt > Date.now() + 90_000) return { session, renewed: false };

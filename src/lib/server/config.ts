@@ -12,12 +12,19 @@ export function appOrigin(): string {
   return url.origin;
 }
 
-export function ownerEmail(): string {
-  const email = process.env.OWNER_EMAIL?.trim().toLowerCase();
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new AppError(503, "OWNER_EMAIL is not configured.");
+export function authorizedEmails(): Set<string> {
+  // OWNER_EMAIL keeps an existing single-user installation working until it is migrated.
+  const raw = process.env.AUTHORIZED_GOOGLE_EMAILS ?? process.env.OWNER_EMAIL ?? "";
+  const emails = raw.split(/[\n,]/).map((value) => value.trim().toLowerCase()).filter(Boolean);
+  if (!emails.length || emails.length > 100 || emails.some((email) =>
+    !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(email))) {
+    throw new AppError(503, "AUTHORIZED_GOOGLE_EMAILS must list 1–100 valid email addresses.");
   }
-  return email;
+  return new Set(emails);
+}
+
+export function isAuthorizedEmail(email: string): boolean {
+  return authorizedEmails().has(email.trim().toLowerCase());
 }
 
 export function googleCredentials() {
@@ -28,7 +35,9 @@ export function googleCredentials() {
 }
 
 export function setupMissing(): string[] {
-  const required = ["APP_ORIGIN", "OWNER_EMAIL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
+  const required = ["APP_ORIGIN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
     "SESSION_SECRET", "NEXT_PUBLIC_GOOGLE_PICKER_API_KEY", "NEXT_PUBLIC_GOOGLE_APP_ID", "NVIDIA_API_KEY"];
-  return required.filter((name) => !process.env[name]);
+  const missing = required.filter((name) => !process.env[name]);
+  try { authorizedEmails(); } catch { missing.push("AUTHORIZED_GOOGLE_EMAILS"); }
+  return missing;
 }

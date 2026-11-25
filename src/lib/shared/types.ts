@@ -51,7 +51,8 @@ export type AttemptRecord = {
 };
 
 export type MapRecord = {
-  schema: 1;
+  schema: 2;
+  subject: string;
   kind: "summary" | "quiz";
   documentId: string;
   sourceMd5: string;

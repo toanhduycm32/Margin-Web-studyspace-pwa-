@@ -5,6 +5,9 @@ import { signMap, verifyMap } from "./crypto";
 import { AppError } from "./errors";
 import { summarizeChunk, generateChunkQuestions, synthesizeSummary, modelName } from "./nvidia";
 import { checkedPdf, getDocumentRecord, getMap, saveArtifact, saveMap } from "./store";
+import { withAiAdmission } from "./ai-admission";
+
+export type AiPrincipal = { sub: string; accessToken: string };
 
 export type ChunkInput = {
   kind: "summary" | "quiz";
@@ -38,16 +41,18 @@ function validChunk(input: ChunkInput): void {
   }
 }
 
-export async function processChunk(accessToken: string, input: ChunkInput): Promise<SignedMap> {
+export async function processChunk(principal: AiPrincipal, input: ChunkInput): Promise<SignedMap> {
   validChunk(input);
+  const { accessToken, sub } = principal;
   await getDocumentRecord(accessToken, input.documentId);
   const file = await checkedPdf(accessToken, input.documentId);
   if (file.md5Checksum !== input.sourceMd5) throw new AppError(409, "PDF changed during processing. Reopen it and start again.");
   const textHash = createHash("sha256").update(input.text).digest("hex");
-  const name = `map-${input.kind}-${input.documentId}-${input.sourceMd5}-${input.requestedCount}-${input.chunkIndex}-${textHash.slice(0, 16)}.json`;
+  const name = `map-v2-${input.kind}-${input.documentId}-${input.sourceMd5}-${input.requestedCount}-${input.chunkIndex}-${textHash.slice(0, 16)}.json`;
   const previous = await getMap(accessToken, name);
   if (previous) {
-    if (!verifyMap(previous.map, previous.signature) || previous.map.textHash !== textHash ||
+    if (!verifyMap(previous.map, previous.signature) || previous.map.schema !== 2 || previous.map.subject !== sub ||
+        previous.map.textHash !== textHash ||
         previous.map.kind !== input.kind || previous.map.documentId !== input.documentId ||
         previous.map.sourceMd5 !== input.sourceMd5 || previous.map.chunkIndex !== input.chunkIndex ||
         previous.map.chunkCount !== input.chunkCount || previous.map.startPage !== input.startPage ||
@@ -58,7 +63,7 @@ export async function processChunk(accessToken: string, input: ChunkInput): Prom
     }
     return previous;
   }
-  const map: MapRecord = { schema: 1, kind: input.kind, documentId: input.documentId,
+  const map: MapRecord = { schema: 2, subject: sub, kind: input.kind, documentId: input.documentId,
     sourceMd5: input.sourceMd5, chunkIndex: input.chunkIndex, chunkCount: input.chunkCount,
     startPage: input.startPage, endPage: input.endPage, pageCount: input.pageCount,
     requestedCount: input.requestedCount, textHash, emptyPages: [...new Set(input.emptyPages)].sort((a, b) => a - b) };
@@ -69,10 +74,12 @@ export async function processChunk(accessToken: string, input: ChunkInput): Prom
     if (input.kind === "summary") map.digest = "These pages contain no extractable text. Their visual content was not interpreted.";
     else map.questions = [];
   } else if (input.kind === "summary") {
-    map.digest = await summarizeChunk(input.text, input.startPage, input.endPage);
+    map.digest = await withAiAdmission(principal, (reserve) =>
+      summarizeChunk(input.text, input.startPage, input.endPage, reserve));
   } else {
     const candidates = Math.min(30, Math.max(2, Math.ceil(input.requestedCount / input.chunkCount) + 1));
-    map.questions = await generateChunkQuestions(input.text, candidates, input.startPage, input.endPage);
+    map.questions = await withAiAdmission(principal, (reserve) =>
+      generateChunkQuestions(input.text, candidates, input.startPage, input.endPage, reserve));
   }
   const signed = { map, signature: signMap(map) };
   await saveMap(accessToken, name, signed);
@@ -87,7 +94,8 @@ export type FinalizeInput = {
   maps: SignedMap[];
 };
 
-export async function finalize(accessToken: string, input: FinalizeInput) {
+export async function finalize(principal: AiPrincipal, input: FinalizeInput) {
+  const { accessToken, sub } = principal;
   if (!input || !["summary", "quiz"].includes(input.kind) || typeof input.documentId !== "string" ||
       typeof input.sourceMd5 !== "string" || !/^[a-f0-9]{32}$/i.test(input.sourceMd5) ||
       !Array.isArray(input.maps) || input.maps.length < 1 || input.maps.length > 80 ||
@@ -110,7 +118,7 @@ export async function finalize(accessToken: string, input: FinalizeInput) {
   }
   for (let index = 0; index < maps.length; index++) {
     const map = maps[index];
-    if (map.schema !== 1 || map.kind !== input.kind || map.documentId !== input.documentId ||
+    if (map.schema !== 2 || map.subject !== sub || map.kind !== input.kind || map.documentId !== input.documentId ||
         map.sourceMd5 !== input.sourceMd5 || map.requestedCount !== input.requestedCount ||
         map.chunkIndex !== index || map.chunkCount !== maps.length || map.pageCount !== pageCount ||
         (index > 0 && map.startPage !== maps[index - 1].endPage + 1) ||
@@ -125,8 +133,8 @@ export async function finalize(accessToken: string, input: FinalizeInput) {
     emptyPages, chunkCount: maps.length };
   if (input.kind === "summary") {
     if (maps.some((map) => !map.digest)) throw new AppError(400, "Summary digest is missing.");
-    const text = await synthesizeSummary(maps.map((map) => ({ startPage: map.startPage,
-      endPage: map.endPage, digest: map.digest! })), pageCount, emptyPages);
+    const text = await withAiAdmission(principal, (reserve) => synthesizeSummary(maps.map((map) => ({ startPage: map.startPage,
+      endPage: map.endPage, digest: map.digest! })), pageCount, emptyPages, reserve));
     return saveArtifact(accessToken, { ...common, kind: "summary", payload: { text } });
   }
   const questions = selectCoveredQuestions(maps, input.requestedCount);
