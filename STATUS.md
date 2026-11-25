@@ -1,5 +1,11 @@
 # Build status — 2026-11-24
 
+## 2026-11-25 second authorized Google account
+
+The user supplied a second authorized Google address. The Git-ignored local `.env.local` now has both accounts in `AUTHORIZED_GOOGLE_EMAILS`; both entries were parsed and checked. The Vercel project `margin-web-studyspace-pwa` has the same allowlist as a Production secret environment variable. The new Production deployment `EubqdsVLkHobU11jZuDQiJgok5BN` reached **Ready**, was marked **Latest**, and lists `https://margin-web-studyspace-pwa.vercel.app/` among its assigned domains. Google Cloud project `studyspace-pwa` remains **External / Testing**; its OAuth **Test users** list already contains both addresses, so no Google Cloud change was needed.
+
+The second person's interactive Google sign-in and simultaneous two-account PDF/AI operation still require that person's browser session and were not observed. The credential values remain only in ignored local configuration and Vercel; none were added to tracked source. The older multi-user milestone below records its state before this account was supplied and before Vercel was updated.
+
 ## 2026-11-25 multi-user architecture enhancement
 
 Target: standalone `pdf-reader-ai` repository on `main`; user-requested replacement of single-owner access with simultaneous independent Google users. The original project workflow v4.64, current handoff, app guidance, checkpoint, and affected source were read before modification. `PROJECT_HANDOFF.md` now notes that the newer multi-user request supersedes its single-owner passages.
