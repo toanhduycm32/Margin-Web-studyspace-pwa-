@@ -28,6 +28,7 @@ An open signup or domain-wide allow rule was rejected because it would authorize
 - A removed email receives 401 with an existing cookie; a 31-day-old cookie is rejected; an unlisted Google identity receives no session and its refresh token is revoked.
 - A signed map from one Google `sub` is rejected when another `sub` tries to finalize it, even if both can open the same PDF.
 - Tests cover two concurrent users entering NVIDIA admission, a second simultaneous call for the same user being denied, separate daily limits, and oversized streamed AI requests.
+- GitHub commit `68c8c09` received a successful Vercel status. The production site serves the new multi-user bundle; unauthenticated library access returns 401 and OAuth start uses the exact production callback.
 - Real simultaneous Google consent and Drive operations for two accounts remain unverified until a second email is added to both Vercel's allowlist and (while Google consent is in Testing) the OAuth test-user list, and both users participate in sign-in. No second user's credentials were supplied or simulated as real.
 
 ## Rollout and rollback

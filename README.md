@@ -58,7 +58,7 @@ Create an API key in your NVIDIA account and set `NVIDIA_API_KEY` in `.env.local
 
 ## Deploy for iPhone access
 
-The deployed origin is `https://margin-web-studyspace-pwa.vercel.app`; your PC need not stay on. The current production endpoint responds, but this multi-user version still needs deployment and a real two-account check.
+The deployed origin is `https://margin-web-studyspace-pwa.vercel.app`; your PC need not stay on. The multi-user bundle is live, but a real two-account check still needs the second authorized email and user consent.
 
 1. This app is published as the root of its own Git repository. Keep `.env.local`, `node_modules`, and `.next` out of Git (already ignored). If deploying from the original larger workspace instead, set the hosting **Root Directory** to `pdf-reader-ai`.
 2. In the existing Vercel project's **Settings → Environment Variables → Production**, add `AUTHORIZED_GOOGLE_EMAILS` with both real emails separated by a comma. Keep the existing `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, Picker values, and NVIDIA key. Set/confirm `APP_ORIGIN=https://margin-web-studyspace-pwa.vercel.app`. `AI_DAILY_CALL_LIMIT=200` and `AI_PROCESS_CONCURRENCY=4` are optional explicit defaults. You may remove `OWNER_EMAIL` after the new allowlist is active.
@@ -67,7 +67,7 @@ The deployed origin is `https://margin-web-studyspace-pwa.vercel.app`; your PC n
 4. Test each account in an independent browser profile or device at the same HTTPS URL: connect, pick or upload a PDF, read, generate a short summary and quiz, reload saved resources, and confirm the other account cannot see them. Test both sessions at the same time.
 5. On iPhone, open the HTTPS URL in Safari, tap **Share → Add to Home Screen**, enable **Open as Web App** when offered, and tap **Add**. [Apple's current instructions](https://support.apple.com/en-az/guide/iphone/iphea86e5236/26/ios/26) describe this flow.
 
-The origin and production OAuth redirect were checked, but this feature has not yet been verified with two real Google accounts or on two physical iPhones; see [STATUS.md](STATUS.md). Each user's Drive data survives code deployments. Existing finished artifacts remain schema 1; new intermediate maps are schema 2 and old map caches are deliberately not reused.
+The production bundle, origin, OAuth redirect, and unauthenticated library denial were checked, but this feature has not yet been verified with two real Google accounts or on two physical iPhones; see [STATUS.md](STATUS.md). Each user's Drive data survives code deployments. Existing finished artifacts remain schema 1; new intermediate maps are schema 2 and old map caches are deliberately not reused.
 
 ## Commands
 
