@@ -5,6 +5,25 @@ import { AppError } from "./errors";
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe("NVIDIA reasoning request", () => {
+  it("sends every requested item schema and reports exhausted validation as a recoverable error", async () => {
+    vi.stubEnv("NVIDIA_API_KEY", "test-key-only");
+    const fetchMock = vi.fn().mockImplementation(async () => Response.json({
+      choices: [{ finish_reason: "stop", message: { content: '{"questions":[]}' } }],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(generateChunkQuestions("Source content with enough readable evidence.",
+      ["select_all", "select_n", "single_best"], ["mechanism", "comparison", "definition"],
+      1, 1, "Source section", async () => {})).rejects.toMatchObject({
+      status: 502, message: expect.stringContaining("complete, source-backed quiz"),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const prompt = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)).messages[1].content;
+    const template = prompt.match(/complete ordered template: (.+?)\. Fill every/)[1];
+    const schemas = JSON.parse(template).questions;
+    expect(schemas.map((q: { response_type: string }) => q.response_type)).toEqual(["select_all", "select_n", "single_best"]);
+    expect(schemas.map((q: { selection_count: number | null }) => q.selection_count)).toEqual([null, 2, null]);
+    expect(schemas.every((q: { source_excerpt?: string }) => typeof q.source_excerpt === "string")).toBe(true);
+  });
   it("sends the source through a server-only reasoning-enabled request", async () => {
     vi.stubEnv("NVIDIA_API_KEY", "test-key-only");
     const digest = "This section defines the topic, describes its mechanism, relates it to the broader course, and notes its limits in enough detail for study.";

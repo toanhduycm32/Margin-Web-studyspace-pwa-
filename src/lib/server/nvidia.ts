@@ -1,5 +1,5 @@
 import { AppError } from "./errors";
-import { validateQuestionsV2 } from "@/lib/shared/quiz";
+import { AssessmentValidationError, validateQuestionsV2 } from "@/lib/shared/quiz";
 import type { QuizQuestionV2, ResponseType } from "@/lib/shared/types";
 import { QUESTION_FAMILY_RULES, SUMMARY_PROFILES, classifyStudyDomain, summaryInstruction, type SummaryProfile } from "@/lib/shared/study-rules";
 import { assessmentContext, CALIBRATION_EXAMPLES, summaryContext } from "./ai-context";
@@ -105,6 +105,14 @@ function parseObject(raw: string): Record<string, unknown> {
   throw new AppError(502, "NVIDIA returned malformed structured output.");
 }
 
+function questionSchema(format: ResponseType, family: string) {
+  return { response_type: format, question_family: family, cognitive_demand: "understand",
+    difficulty: "intermediate", question: "...", options: ["...", "...", "...", "..."],
+    correct_option_ids: format === "single_best" ? [0] : [0, 2],
+    selection_count: format === "select_n" ? 2 : null, explanation: "...",
+    option_explanations: ["...", "...", "...", "..."], source_excerpt: "..." };
+}
+
 export async function summarizeChunk(source: string, start: number, end: number, profile: SummaryProfile,
   sectionTitle: string, sectionSource: string, wordTarget: number, reserveCall: () => Promise<void>,
   signal?: AbortSignal, evidence: EvidenceSource[] = [], onModelUsed?: (model: string) => void): Promise<string> {
@@ -131,7 +139,8 @@ export async function generateChunkQuestions(source: string, formats: ResponseTy
   signal?: AbortSignal, evidence: EvidenceSource[] = [], onModelUsed?: (model: string) => void): Promise<QuizQuestionV2[]> {
   const plan = formats.map((format, index) => `${index + 1}. ${format} / ${families[index]}: ${QUESTION_FAMILY_RULES[families[index] as keyof typeof QUESTION_FAMILY_RULES]}`).join("\n");
   const domain = classifyStudyDomain(`${sectionTitle} ${source}`);
-  const prompt = `Create exactly ${formats.length} distinct, source-grounded assessment items from PDF pages ${start}–${end} in section "${sectionTitle}". ${assessmentContext(domain)}\n${CALIBRATION_EXAMPLES}\nFollow this ordered blueprint exactly:\n${plan}\n\nResponse rules: single_best has exactly one defensible correct answer and every other option must be false under the stem's conditions; select_all has at least two correct and one incorrect option; select_n has at least two correct and one incorrect option and selection_count equals the exact number of correct options. Use 4–6 comparable options, vary correct positions and counts, and avoid all/none shortcuts. Every option must be independently true or false under the stem's stated conditions. A true but less relevant statement is NOT an acceptable incorrect option. For a single-best item, test each distractor against the source: if it is true, rewrite the distractor or narrow the stem until it becomes clearly false. Build plausible wrong options from meaningful misconceptions, reversed relations, missing conditions or calculation errors. Vary objective and reasoning path; avoid trivia, trick wording and artificial difficulty. Use source terminology. For each option, explain why it is right or wrong under the stated conditions. The overall explanation must teach the concept, not repeat the answer. Application scenarios may be constructed only from source-supported rules. Each item needs an exact contiguous source_excerpt (at least eight characters) copied from the supplied text; this is an anchor, not sole proof of semantic support. Set cognitive_demand to remember, understand, apply or analyze; difficulty to foundational, intermediate or advanced. Before returning, check every option, all necessary assumptions, answer-set completeness and source support. Return only JSON with this schema: {"questions":[{"response_type":"${formats[0]}","question_family":"${families[0]}","cognitive_demand":"understand","difficulty":"intermediate","question":"...","options":["...","...","...","..."],"correct_option_ids":${formats[0] === "single_best" ? "[0]" : "[0,2]"},"selection_count":${formats[0] === "select_n" ? 2 : "null"},"explanation":"...","option_explanations":["...","...","...","..."],"source_excerpt":"..."}]}. Indices are zero based.\n\n<untrusted_pdf_text>\n${source}\n</untrusted_pdf_text>\n\nOutput checklist: every item MUST contain correct_option_ids and one option_explanations entry per option. For single_best and select_all, selection_count MUST be null. For select_n, selection_count MUST equal the answer key size. Copy source_excerpt character-for-character from the PDF text. The single_best wrong options must each be false, not just irrelevant.`;
+  const outputTemplate = JSON.stringify({ questions: formats.map((format, index) => questionSchema(format, families[index])) });
+  const prompt = `Create exactly ${formats.length} distinct, source-grounded assessment items from PDF pages ${start}–${end} in section "${sectionTitle}". ${assessmentContext(domain)}\n${CALIBRATION_EXAMPLES}\nFollow this ordered blueprint exactly:\n${plan}\n\nResponse rules: single_best has exactly one defensible correct answer and every other option must be false under the stem's conditions; select_all has at least two correct and one incorrect option; select_n has at least two correct and one incorrect option and selection_count equals the exact number of correct options. Use 4–6 comparable options, vary correct positions and counts, and avoid all/none shortcuts. Every option must be independently true or false under the stem's stated conditions. A true but less relevant statement is NOT an acceptable incorrect option. For a single-best item, test each distractor against the source: if it is true, rewrite the distractor or narrow the stem until it becomes clearly false. Build plausible wrong options from meaningful misconceptions, reversed relations, missing conditions or calculation errors. Vary objective and reasoning path; avoid trivia, trick wording and artificial difficulty. Use source terminology. For each option, explain why it is right or wrong under the stated conditions. The overall explanation must teach the concept, not repeat the answer. Application scenarios may be constructed only from source-supported rules. Each item needs an exact contiguous source_excerpt (at least eight characters) copied from the supplied text; this is an anchor, not sole proof of semantic support. Set cognitive_demand to remember, understand, apply or analyze; difficulty to foundational, intermediate or advanced. Before returning, check every option, all necessary assumptions, answer-set completeness and source support. Return one JSON object using this complete ordered template: ${outputTemplate}. Fill every one of its ${formats.length} question objects; do not return a single example, string entries, or fields outside those objects. Keep explanations concise (one or two sentences per option, two to four sentences overall) while preserving necessary conditions. Indices are zero based.\n\n<untrusted_pdf_text>\n${source}\n</untrusted_pdf_text>\n\nOutput checklist: every item MUST contain correct_option_ids and one option_explanations entry per option. For single_best and select_all, selection_count MUST be null. For select_n, selection_count MUST equal the answer key size. Copy source_excerpt character-for-character from the PDF text. The single_best wrong options must each be false, not just irrelevant.`;
   let feedback = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     const raw = await callNvidia(prompt + feedback, 16000, 4096, reserveCall, signal, onModelUsed);
@@ -164,11 +173,7 @@ export async function generateChunkQuestions(source: string, formats: ResponseTy
         const index = typeof issue === "object" && issue !== null && Number.isInteger(issue.index)
           ? Number(issue.index) - 1 : -1;
         if (index >= 0 && index < questions.length && typeof issue.reason === "string") {
-          const example = { response_type: formats[index], question_family: families[index], cognitive_demand: "understand",
-            difficulty: "intermediate", question: "...", options: ["...", "...", "...", "..."],
-            correct_option_ids: formats[index] === "single_best" ? [0] : [0, 2],
-            selection_count: formats[index] === "select_n" ? 2 : null, explanation: "...",
-            option_explanations: ["...", "...", "...", "..."], source_excerpt: "..." };
+          const example = questionSchema(formats[index], families[index]);
           const repair = `Replace only item ${index + 1} of this assessment. Keep response_type ${formats[index]} and question_family ${families[index]}. ${assessmentContext(domain)} Reviewer concern: ${issue.reason.slice(0, 500)}. Return JSON with exactly one question using this full schema: ${JSON.stringify({ questions: [example] })}. Indices are zero based. Include an explanation for every option. Copy an exact source_excerpt. The previous item uses internal field names; return the snake_case fields in the output schema above.\n<previous_item>\n${JSON.stringify(questions[index])}\n</previous_item>\n<untrusted_pdf_text>\n${source}\n</untrusted_pdf_text>`;
           const replacement = parseObject(await callNvidia(repair, 6500, 3072, reserveCall, signal, onModelUsed));
           const checked = validateQuestionsV2(replacement.questions, source, [formats[index]], [families[index]], start, end)[0];
@@ -187,7 +192,12 @@ export async function generateChunkQuestions(source: string, formats: ResponseTy
     } catch (error) {
       if (error instanceof AppError && error.message !== "NVIDIA returned malformed structured output." &&
           error.message !== "Assessment review found ambiguous or unsupported answers. Retry to regenerate this section.") throw error;
-      if (attempt === 1) throw error;
+      if (error instanceof AssessmentValidationError) {
+        // Only fixed validator messages are logged; never PDF text or model output.
+        console.warn("ai_validation", { attempt: attempt + 1, reason: error.message });
+        if (attempt === 1) throw new AppError(502,
+          "The AI could not produce a complete, source-backed quiz for this section. Retry or choose fewer questions.");
+      } else if (attempt === 1 || !(error instanceof AppError)) throw error;
       feedback = `\n\nThe previous response failed validation: ${error instanceof Error ? error.message.slice(0, 240) : "invalid output"} Return every required field with exact source excerpts and unambiguous answer keys.`;
     }
   }

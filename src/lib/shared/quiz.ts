@@ -3,6 +3,16 @@ import { QUESTION_FAMILIES, classifyStudyDomain } from "./study-rules";
 import { MAX_QUESTION_BYTES } from "./limits";
 
 const normalized = (text: string) => text.trim().toLocaleLowerCase().replace(/\s+/g, " ");
+export class AssessmentValidationError extends Error {}
+
+function originalSourceExcerpt(source: string, excerpt: unknown): string | null {
+  if (typeof excerpt !== "string" || excerpt.trim().length < 8 || excerpt.length > 20_000) return null;
+  if (source.includes(excerpt)) return excerpt;
+  // PDF visual line wraps are layout, not changes to the quoted words. Match only
+  // whitespace differences, then retain the actual source span for provenance.
+  const pattern = excerpt.trim().split(/\s+/u).map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
+  return source.match(new RegExp(pattern, "u"))?.[0] || null;
+}
 
 export function correctOptionIds(question: QuizQuestion): number[] {
   return "correctOptionIds" in question ? question.correctOptionIds : [question.answer];
@@ -39,25 +49,26 @@ export function validateQuestions(value: unknown, source: string, expected: numb
 export function validateQuestionsV2(value: unknown, source: string, formats: ResponseType[], families: string[],
   startPage: number, endPage: number): QuizQuestionV2[] {
   if (!Array.isArray(value) || value.length !== formats.length || formats.length !== families.length) {
-    throw new Error(`Expected ${formats.length} complete assessment items.`);
+    throw new AssessmentValidationError(`Expected ${formats.length} complete assessment items.`);
   }
   const seen = new Set<string>();
   return value.map((raw, index) => {
-    if (!raw || typeof raw !== "object") throw new Error("Assessment item is malformed.");
+    if (!raw || typeof raw !== "object") throw new AssessmentValidationError("Assessment item is malformed.");
     const item = raw as Record<string, unknown>;
     const options = item.options;
     const keys = item.correct_option_ids;
     const explanations = item.option_explanations;
-    if (!Array.isArray(keys)) throw new Error(`Item ${index + 1} omitted correct_option_ids.`);
-    if (!Array.isArray(explanations)) throw new Error(`Item ${index + 1} omitted option_explanations.`);
+    if (!Array.isArray(keys)) throw new AssessmentValidationError(`Item ${index + 1} omitted correct_option_ids.`);
+    if (!Array.isArray(explanations)) throw new AssessmentValidationError(`Item ${index + 1} omitted option_explanations.`);
     if (formats[index] === "single_best" && item.selection_count != null) {
-      throw new Error(`Item ${index + 1} must set selection_count to null for single_best.`);
+      throw new AssessmentValidationError(`Item ${index + 1} must set selection_count to null for single_best.`);
     }
     if (formats[index] === "select_n" && item.selection_count !== keys.length) {
-      throw new Error(`Item ${index + 1} selection_count must equal correct_option_ids length.`);
+      throw new AssessmentValidationError(`Item ${index + 1} selection_count must equal correct_option_ids length.`);
     }
-    if (typeof item.source_excerpt !== "string" || !source.includes(item.source_excerpt)) {
-      throw new Error(`Item ${index + 1} must copy an exact contiguous source_excerpt.`);
+    const sourceExcerpt = originalSourceExcerpt(source, item.source_excerpt);
+    if (!sourceExcerpt) {
+      throw new AssessmentValidationError(`Item ${index + 1} must copy an exact contiguous source_excerpt.`);
     }
     if (item.response_type !== formats[index] || item.question_family !== families[index] ||
         !QUESTION_FAMILIES.includes(item.question_family as typeof QUESTION_FAMILIES[number]) ||
@@ -76,9 +87,8 @@ export function validateQuestionsV2(value: unknown, source: string, formats: Res
         typeof item.explanation !== "string" || item.explanation.trim().length < 35 ||
         !Array.isArray(explanations) || explanations.length !== options.length ||
         explanations.some((part) => typeof part !== "string" || part.trim().length < 12) ||
-        typeof item.source_excerpt !== "string" || item.source_excerpt.length < 8 ||
-        !source.includes(item.source_excerpt)) {
-      throw new Error("Assessment item has invalid evidence, answers, explanations or response format.");
+        !sourceExcerpt) {
+      throw new AssessmentValidationError("Assessment item has invalid evidence, answers, explanations or response format.");
     }
     const stem = normalized(item.question);
     if (classifyStudyDomain(source) !== "general") {
@@ -87,10 +97,10 @@ export function validateQuestionsV2(value: unknown, source: string, formats: Res
       const drugs = optionText.match(/\b(?:amoxicillin|penicillin|clindamycin|azithromycin|doxycycline|ibuprofen|naproxen|acetaminophen|paracetamol|metformin|insulin|warfarin|apixaban)\b/g) || [];
       const regimens = optionText.match(/\b\d+(?:\.\d+)?[- ](?:mg|g|mcg|µg|days?|weeks?|months?|hours?)\b/g) || [];
       if ([...drugs, ...regimens].some((detail) => !sourceTerms.includes(normalized(detail)))) {
-        throw new Error("Assessment item invented a clinical drug, dose or duration absent from the PDF source.");
+        throw new AssessmentValidationError("Assessment item invented a clinical drug, dose or duration absent from the PDF source.");
       }
     }
-    if (seen.has(stem)) throw new Error("Duplicate assessment items were generated.");
+    if (seen.has(stem)) throw new AssessmentValidationError("Duplicate assessment items were generated.");
     seen.add(stem);
     const question: QuizQuestionV2 = { id: `${startPage}-${endPage}-${index + 1}`, responseType: formats[index],
       selectionCount: formats[index] === "select_n" ? keys.length : null,
@@ -98,9 +108,9 @@ export function validateQuestionsV2(value: unknown, source: string, formats: Res
       difficulty: item.difficulty as QuizQuestionV2["difficulty"], question: item.question.trim(),
       options: options.map((part) => String(part).trim()), correctOptionIds: [...keys].sort((a, b) => a - b),
       explanation: item.explanation.trim(), optionExplanations: explanations.map((part) => String(part).trim()),
-      sourceExcerpt: item.source_excerpt, startPage, endPage };
+      sourceExcerpt, startPage, endPage };
     if (new TextEncoder().encode(JSON.stringify(question)).byteLength > MAX_QUESTION_BYTES) {
-      throw new Error(`Item ${index + 1} is too verbose. Shorten its explanation and source excerpt while preserving all necessary conditions.`);
+      throw new AssessmentValidationError(`Item ${index + 1} is too verbose. Shorten its explanation and source excerpt while preserving all necessary conditions.`);
     }
     return question;
   });

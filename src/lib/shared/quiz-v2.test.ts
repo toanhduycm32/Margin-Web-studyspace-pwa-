@@ -34,6 +34,16 @@ describe("multiple-response assessment contract", () => {
     expect(() => validateQuestionsV2([{ ...item("single_best", [0], null), source_excerpt: "invented proof" }], source,
       ["single_best"], ["mechanism"], 1, 1)).toThrow();
   });
+  it("accepts PDF line wrapping but stores the original source span and rejects changed facts", () => {
+    const wrapped = source.replace("rate can overshoot", "rate\ncan   overshoot");
+    const questions = validateQuestionsV2([item("single_best", [0], null)], wrapped,
+      ["single_best"], ["mechanism"], 1, 1);
+    expect(questions[0].sourceExcerpt).toBe("A high learning rate\ncan   overshoot a minimum.");
+    expect(wrapped).toContain(questions[0].sourceExcerpt);
+    expect(() => validateQuestionsV2([{ ...item("single_best", [0], null),
+      source_excerpt: "A high learning rate cannot overshoot a minimum." }], wrapped,
+    ["single_best"], ["mechanism"], 1, 1)).toThrow();
+  });
   it("rejects invented clinical drugs and durations in distractors", () => {
     const dental = "Dental treatment is prioritized for adults with pulpitis. Antibiotics are not an adjunct when definitive dental treatment is available.";
     const raw = { ...item("single_best", [0], null), question_family: "management",
