@@ -4,7 +4,10 @@ import type { DocumentSection } from "@/lib/shared/types";
 export type TextPage = { page: number; text: string };
 export type TextChunk = { startPage: number; endPage: number; text: string; emptyPages: number[]; section?: DocumentSection };
 
+// Vietnamese text needs substantially more output tokens than English. Keep each
+// transport segment small while retaining the original lesson as its owning section.
 export const MAX_CHUNK_CHARACTERS = 45_000;
+const TARGET_CHUNK_CHARACTERS = 18_000;
 export const MAX_CHUNKS = 80;
 
 type PdfTextItems = Awaited<ReturnType<Awaited<ReturnType<PDFDocumentProxy["getPage"]>>["getTextContent"]>>["items"];
@@ -12,13 +15,29 @@ type PdfTextItems = Awaited<ReturnType<Awaited<ReturnType<PDFDocumentProxy["getP
 export function extractPageText(items: PdfTextItems): string {
   const lines: string[] = [];
   let line = "";
+  let previous: { right: number; y: number; size: number; zeroAccent: boolean } | null = null;
   for (const item of items) {
     if (!("str" in item)) continue;
     const piece = item.str.replace(/[\t ]+/g, " ");
-    if (piece.trim()) line += `${line && !/\s$/.test(line) && !/^\s/.test(piece) ? " " : ""}${piece}`;
-    if (item.hasEOL) { if (line.trim()) lines.push(line.trim()); line = ""; }
+    const coordinates = Array.isArray(item.transform) && Number.isFinite(item.width);
+    // Some embedded fonts report a composed Vietnamese vowel as zero width.
+    // PDF.js then emits a synthetic space occupying that same glyph's advance.
+    if (piece === " " && coordinates && previous?.zeroAccent && !item.hasEOL &&
+        item.transform[4] + item.width <= previous.right + previous.size * 0.12) continue;
+    const gap = coordinates && previous ? item.transform[4] - previous.right : Infinity;
+    const separated = !coordinates || !previous || gap > Math.max(0.6, previous.size * 0.13);
+    // A Vietnamese syllable may be split across font runs at each accented glyph.
+    // Respect actual spaces and geometry; inserting a space per item corrupts words.
+    if (piece) line += `${line && separated && !/\s$/.test(line) && !/^\s/.test(piece) ? " " : ""}${piece}`;
+    if (coordinates && piece) {
+      const size = Math.abs(item.transform[0]) || 12;
+      const zeroAccent = item.width === 0 && /^\p{L}\p{M}+$/u.test(piece);
+      previous = { right: item.transform[4] + (zeroAccent ? size * 0.5 : item.width),
+        y: item.transform[5], size, zeroAccent };
+    }
+    if (item.hasEOL) { if (line.trim()) lines.push(line.trim().normalize("NFC")); line = ""; previous = null; }
   }
-  if (line.trim()) lines.push(line.trim());
+  if (line.trim()) lines.push(line.trim().normalize("NFC"));
   return lines.join("\n");
 }
 
@@ -27,7 +46,7 @@ function appendPage(chunks: TextChunk[], current: TextChunk | null, page: TextPa
     .map((line) => line.replace(/[\t ]+/g, " ").trim()).filter(Boolean).join("\n");
   const part = `Page ${page.page}\n${readable || "[No extractable text]"}`;
   if (part.length > MAX_CHUNK_CHARACTERS) throw new Error(`Page ${page.page} contains too much text to process safely.`);
-  if (current && current.text.length + part.length + 2 > MAX_CHUNK_CHARACTERS) {
+  if (current && current.text.length + part.length + 2 > TARGET_CHUNK_CHARACTERS) {
     chunks.push(current); current = null;
   }
   if (!current) {

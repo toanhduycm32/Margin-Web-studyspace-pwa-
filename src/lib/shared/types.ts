@@ -26,7 +26,8 @@ export type LegacyQuizQuestion = {
 
 export type ResponseType = "single_best" | "select_all" | "select_n";
 export type EvidenceMode = "pdf" | "research";
-export type EvidenceReference = { title: string; year: string; url: string };
+export type EvidenceReference = { title: string; year: string; url: string;
+  kind?: "curated_guideline_note" | "research_abstract"; reviewedAt?: string };
 export type QuizQuestionV2 = {
   id: string;
   responseType: ResponseType;
@@ -42,6 +43,8 @@ export type QuizQuestionV2 = {
   sourceExcerpt: string;
   startPage: number;
   endPage: number;
+  objectiveId?: string;
+  shuffleOptions?: boolean;
 };
 export type QuizQuestion = LegacyQuizQuestion | QuizQuestionV2;
 
@@ -51,6 +54,23 @@ export type DocumentSection = {
   startPage: number;
   endPage: number;
   source: "outline" | "heading" | "inferred";
+  role?: "instruction" | "front_matter";
+  objectives?: string[];
+  headings?: string[];
+};
+
+export type LearningObjective = {
+  id: string;
+  concept: string;
+  objective: string;
+  sourceExcerpt: string;
+  family: string;
+  secondaryFamily?: string;
+};
+export type LearningPlan = { objectives: LearningObjective[]; limitations: string[] };
+export type GenerationOperation = {
+  schema: 1; id: string; subject: string; documentId: string; sourceMd5: string;
+  kind: "summary" | "quiz"; startedAt: string;
 };
 
 export type ArtifactRecord = {
@@ -72,6 +92,10 @@ export type ArtifactRecord = {
   evidenceMode?: EvidenceMode;
   evidenceReferences?: EvidenceReference[];
   modelsUsed?: string[];
+  generation?: { operationId: string; startedAt: string };
+  learningObjectives?: LearningObjective[];
+  assessedObjectiveIds?: string[];
+  planningLimitations?: string[];
   payload: { text: string } | { questions: QuizQuestion[] };
 };
 
@@ -111,6 +135,9 @@ export type MapRecord = {
   evidenceMode?: EvidenceMode;
   evidenceReferences?: EvidenceReference[];
   modelsUsed?: string[];
+  operationId?: string;
+  objectives?: LearningObjective[];
+  planningLimitations?: string[];
 };
 
 export type SignedMap = { map: MapRecord; signature: string };
@@ -125,5 +152,5 @@ export type DriveFile = {
   modifiedTime?: string;
   capabilities?: { canDownload?: boolean };
 };
-export type ChunkProgress = { pending: true; completedQuestions: number; totalQuestions: number };
+export type ChunkProgress = { pending: true; completedQuestions: number; totalQuestions: number; stage?: string };
 export type ChunkResult = SignedMap | ChunkProgress;

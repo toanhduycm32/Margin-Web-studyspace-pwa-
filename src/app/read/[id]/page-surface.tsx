@@ -42,9 +42,9 @@ function PageSurface({ pdf, number, width, active }: {
   }, [active, number, pdf, width]);
 
   const height = Math.round(width * aspect);
-  return <section id={`pdf-page-${number}`} data-reader-page={number} className="pdf-page" style={{ minHeight: height }} aria-label={`PDF page ${number}`}>
+  return <section id={`pdf-page-${number}`} data-reader-page={number} className="pdf-page" style={{ minHeight: height }} aria-label={`Trang PDF ${number}`}>
     {active ? <canvas ref={canvasRef} /> : <div className="page-placeholder" style={{ height }} />}
-    {error && <div className="page-error">Page {number} could not be rendered. Scroll away and back to retry.</div>}
+    {error && <div className="page-error">Chưa hiển thị được trang {number}. Cuộn sang trang khác rồi quay lại để thử lại.</div>}
     <span className="page-label">{number}</span>
   </section>;
 }

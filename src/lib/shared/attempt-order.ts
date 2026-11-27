@@ -4,6 +4,8 @@ import type { QuizQuestion } from "./types";
 export function newOptionOrders(questions: QuizQuestion[], previous?: number[][]): number[][] {
   return questions.map((question, questionIndex) => {
     const order = question.options.map((_, index) => index);
+    if (("shuffleOptions" in question && question.shuffleOptions === false) ||
+        question.options.some((option) => /\b(?:[A-F]\s*(?:và|and|hoặc|or|&)\s*[A-F])\b/i.test(option))) return order;
     for (let index = order.length - 1; index > 0; index--) {
       const random = new Uint32Array(1);
       globalThis.crypto.getRandomValues(random);

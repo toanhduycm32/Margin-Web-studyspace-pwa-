@@ -38,3 +38,11 @@ h1,h2,h3,p{margin-top:0}h1,h2{font-family:Georgia,'Times New Roman',serif;font-w
 .quiz-pagination{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:18px 0 20px}
 .quiz-pagination .button{padding:9px 11px;font-size:.77rem}
 .quiz-pagination span{color:#6b7d6e;font-size:.8rem;white-space:nowrap}
+
+.resource-action{display:grid;gap:4px}.regenerate{justify-self:end;min-height:40px;padding:7px 3px;font-size:.78rem}.processing:has(+.back-to-tools){border-bottom:1px solid var(--line);margin-bottom:22px}.coverage-warning ul{padding-left:19px;margin-bottom:0}
+
+.summary-body h4{margin:22px 0 8px;font-size:1rem;color:var(--green)}.summary-body h5{margin:18px 0 7px;font-size:.94rem;color:var(--ink)}
+.summary-table { overflow-x: auto; margin: 1.2rem 0; }
+.summary-table table { width: 100%; border-collapse: collapse; font-size: .9em; }
+.summary-table th, .summary-table td { padding: .7rem; border-bottom: 1px solid #deddd7; text-align: left; vertical-align: top; min-width: 8rem; }
+.summary-table th { font-weight: 600; }

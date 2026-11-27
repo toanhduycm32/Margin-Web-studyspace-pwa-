@@ -1,3 +1,5 @@
+> **Current Vietnamese learning amendment (27 November 2026):** [VIETNAMESE_LEARNING_CONTEXT.md](VIETNAMESE_LEARNING_CONTEXT.md) is the current product authority. One Vietnamese medical/dental learning mode replaces selectable summary profiles, manual quiz counts and research toggles. Each PDF has one current summary and one current quiz, safely replaced only after successful validation and persistence. This is an upgrade, not another rebuild. Earlier conflicting passages below are historical.
+
 # PROJECT CONTEXT HANDOFF
 
 > **Current multi-user amendment (25 November 2026):** The user's later Architecture Enhancement request supersedes every single-owner or `OWNER_EMAIL` restriction below. Margin now supports multiple explicitly authorized Google accounts with independent sessions and per-account Drive persistence. `AUTHORIZED_GOOGLE_EMAILS` is the current allowlist; `OWNER_EMAIL` remains only as a migration fallback. See [MULTI_USER_ARCHITECTURE.md](MULTI_USER_ARCHITECTURE.md) and [STATUS.md](STATUS.md) for the implemented design and verification limits. All other product requirements in this handoff remain in force.

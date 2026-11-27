@@ -17,12 +17,13 @@ describe("public research lookup", () => {
     const source = "Patient Jane Smith, 555-0123, has irreversible pulpitis. PRIVATE-SOURCE-ID";
     expect(publicEvidenceQuery(source, "dental")).toBe("irreversible pulpitis");
     const result = await retrieveEvidence(source, "dental");
-    expect(result).toHaveLength(1);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({ kind: "curated_guideline_note", year: "2015" });
     const url = String(fetchMock.mock.calls[0][0]);
     expect(url).toContain("irreversible+pulpitis");
     expect(url).not.toContain("Jane");
     expect(url).not.toContain("PRIVATE-SOURCE-ID");
-    expect(result[0].url).toBe("https://europepmc.org/article/MED/12345678");
+    expect(result[1].url).toBe("https://europepmc.org/article/MED/12345678");
   });
   it("does not search an unmatched or general document", async () => {
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);

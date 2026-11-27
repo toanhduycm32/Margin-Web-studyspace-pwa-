@@ -7,12 +7,16 @@ import { generateChunkQuestions } from "./nvidia";
 import { retrieveEvidence } from "./evidence";
 
 vi.mock("./store", () => ({
+  generationOperation: vi.fn(async () => ({ startedAt: "2026-11-27T01:00:00.000Z" })),
   getDocumentRecord: vi.fn(async () => ({})), checkedPdf: vi.fn(async () => ({ md5Checksum: "a".repeat(32) })),
   getMap: vi.fn(), saveMap: vi.fn(), saveArtifact: vi.fn(),
 }));
 vi.mock("./ai-admission", () => ({ withAiAdmission: async (_principal: unknown, fn: (reserve: () => Promise<void>) => unknown) => fn(async () => {}) }));
 vi.mock("./nvidia", () => ({ generateChunkQuestions: vi.fn(), summarizeChunk: vi.fn(), modelName: () => "test-model" }));
 vi.mock("./evidence", () => ({ retrieveEvidence: vi.fn() }));
+vi.mock("./checkpoint-store", () => ({ driveCheckpointStore: () => ({
+  read: async () => null, write: async () => {},
+}) }));
 
 afterEach(() => { vi.unstubAllEnvs(); vi.resetAllMocks(); });
 const input: ChunkInput = { kind: "quiz", operationId: "12345678-1234-1234-1234-123456789abc",
@@ -36,8 +40,12 @@ describe("checkpointed assessment requests", () => {
         question: `${evidence![0].title} question ${i}` } as QuizQuestionV2));
     });
     const principal = { sub: "alice", accessToken: "alice-token" };
-    expect(await processChunk(principal, input)).toEqual({ pending: true, completedQuestions: 5, totalQuestions: 10 });
+    expect(await processChunk(principal, input)).toEqual({ pending: true, completedQuestions: 2, totalQuestions: 10 });
     expect(generateChunkQuestions).toHaveBeenCalledTimes(1);
+    vi.mocked(retrieveEvidence).mockResolvedValue([{ title: "Evidence B", year: "2026", url: "https://europepmc.org/article/MED/222", abstract: "B" }]);
+    for (let count = 4; count < 10; count += 2) {
+      expect(await processChunk(principal, input)).toEqual({ pending: true, completedQuestions: count, totalQuestions: 10 });
+    }
     const completed = await processChunk(principal, input);
     if ("pending" in completed) throw new Error("Expected completed map");
     expect(completed.map.questions).toHaveLength(10);
@@ -45,8 +53,8 @@ describe("checkpointed assessment requests", () => {
     expect(completed.map.evidenceReferences!.map((ref) => ref.title)).toEqual(["Evidence A", "Evidence B"]);
     expect(verifyMap(completed.map, completed.signature)).toBe(true);
     expect(await processChunk(principal, input)).toEqual(completed);
-    expect(generateChunkQuestions).toHaveBeenCalledTimes(2);
-    expect(retrieveEvidence).toHaveBeenCalledTimes(2);
+    expect(generateChunkQuestions).toHaveBeenCalledTimes(5);
+    expect(retrieveEvidence).toHaveBeenCalledTimes(5);
     const batchKey = [...saved.keys()].find((key) => key.endsWith("-batch-0.json"))!;
     const batch = saved.get(batchKey)!;
     batch.map.subject = "bob"; batch.signature = signMap(batch.map);

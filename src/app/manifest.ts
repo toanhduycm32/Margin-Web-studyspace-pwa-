@@ -2,9 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Margin · PDF learning",
+    name: "Margin · Học cùng PDF",
     short_name: "Margin",
-    description: "A focused PDF reader with whole-document learning tools",
+    description: "Đọc PDF và học Y khoa, Răng Hàm Mặt bằng tiếng Việt",
     start_url: "/",
     display: "standalone",
     background_color: "#f6f5f0",

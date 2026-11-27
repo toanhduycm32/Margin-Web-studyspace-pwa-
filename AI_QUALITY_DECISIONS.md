@@ -1,4 +1,8 @@
-# AI quality decisions and evaluation — 2026-11-25
+# AI quality decisions and evaluation
+
+**Current, 27 November 2026:** [VIETNAMESE_UPGRADE_REVIEW.md](VIETNAMESE_UPGRADE_REVIEW.md) records the Vietnamese single-mode implementation, source research, current-resource replacement, real-provider failures and remaining acceptance work. It supersedes earlier selectable-profile/count decisions below. Earlier experiments remain historical evidence, not verification of the new mode.
+
+## Historical evaluation — 2026-11-25
 
 ## Evidence and choices
 

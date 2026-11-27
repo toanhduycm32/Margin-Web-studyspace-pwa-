@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AppDataMeta } from "./google";
-import { createAppData, driveFile, findAppData, listAppData, readAppData, updateAppData } from "./google";
+import { createAppData, deleteAppData, driveFile, findAppData, listAppData, readAppData, updateAppData } from "./google";
 import { AppError } from "./errors";
-import type { ArtifactRecord, AttemptRecord, DocumentRecord, DriveFile, LibraryItem, SignedMap } from "@/lib/shared/types";
+import type { ArtifactRecord, AttemptRecord, DocumentRecord, DriveFile, GenerationOperation, LibraryItem, SignedMap } from "@/lib/shared/types";
 
 const PDF_MIME = "application/pdf";
 const MAX_PDF_SIZE = 250 * 1024 * 1024;
@@ -100,17 +100,19 @@ export async function saveArtifact(accessToken: string, artifact: Omit<ArtifactR
             saved.payload.questions.length !== artifact.payload.questions.length)) {
         throw new AppError(409, "This operation ID belongs to a different learning resource.");
       }
+      if (artifact.generation) await retireSuperseded(accessToken, saved);
       return saved;
     }
   }
   const full: ArtifactRecord = { ...artifact, id, createdAt: new Date().toISOString() };
   await createAppData(accessToken, name, full,
     { kind: "artifact", documentId: full.documentId, artifactId: full.id, artifactKind: full.kind,
-      sourceMd5: full.sourceMd5 }, `${full.kind === "summary" ? "Summary" : "Quiz"} · ${full.createdAt}`);
+      sourceMd5: full.sourceMd5, ...(full.generation ? { generationStart: full.generation.startedAt, operationId: full.generation.operationId } : {}) }, `${full.kind === "summary" ? "Tóm tắt" : "Trắc nghiệm"} · ${full.createdAt}`);
+  if (full.generation) await retireSuperseded(accessToken, full);
   return full;
 }
 
-export async function listArtifacts(accessToken: string, documentId: string) {
+async function artifactFiles(accessToken: string, documentId: string) {
   if (!validSourceId(documentId)) throw new AppError(400, "Invalid document ID.");
   const files: AppDataMeta[] = [];
   let pageToken: string | undefined;
@@ -121,9 +123,93 @@ export async function listArtifacts(accessToken: string, documentId: string) {
     pageToken = result.nextPageToken;
     if (!pageToken) break;
   }
-  return files.map((meta) => ({ id: meta.appProperties?.artifactId || "", kind: meta.appProperties?.artifactKind || "",
+  if (pageToken) throw new AppError(503, "Thư viện học liệu quá lớn để đối soát an toàn. Chưa thay đổi bản hiện hành.");
+  return files;
+}
+
+export function artifactOrder(meta: AppDataMeta): string {
+  return `${meta.appProperties?.generationStart || meta.createdTime || meta.modifiedTime || ""}|${meta.appProperties?.operationId || meta.appProperties?.artifactId || meta.id}`;
+}
+
+export async function listArtifacts(accessToken: string, documentId: string) {
+  const files = await artifactFiles(accessToken, documentId);
+  const winners = new Map<string, AppDataMeta>();
+  for (const meta of files) {
+    const kind = meta.appProperties?.artifactKind || "";
+    if (!["summary", "quiz"].includes(kind) || !/^[0-9a-f-]{36}$/i.test(meta.appProperties?.artifactId || "")) continue;
+    const old = winners.get(kind);
+    if (!old || artifactOrder(meta) > artifactOrder(old)) winners.set(kind, meta);
+  }
+  return [...winners.values()].map((meta) => ({ id: meta.appProperties?.artifactId || "", kind: meta.appProperties?.artifactKind || "",
     sourceMd5: meta.appProperties?.sourceMd5 || "", createdAt: meta.modifiedTime || "", recordId: meta.id }))
     .filter((item) => /^[0-9a-f-]{36}$/i.test(item.id));
+}
+
+// Publication is the successful creation of an immutable accepted artifact. Reads
+// choose the greatest server-issued operation order, never the last response to finish.
+// There is no read/modify/write current pointer and no claim of a Drive transaction.
+async function retireSuperseded(accessToken: string, accepted: ArtifactRecord): Promise<void> {
+  let files: AppDataMeta[];
+  try { files = await artifactFiles(accessToken, accepted.documentId); }
+  catch { console.warn("artifact_cleanup_deferred", { kind: accepted.kind }); return; }
+  const rank = `${accepted.generation!.startedAt}|${accepted.generation!.operationId}`;
+  const newer = files.find((meta) => meta.appProperties?.artifactKind === accepted.kind && artifactOrder(meta) > rank);
+  if (newer) {
+    // A delayed older operation must not resurrect a resource or remove the winner.
+    for (const meta of files.filter((file) => file.appProperties?.artifactId === accepted.id)) {
+      try { await deleteAppData(accessToken, meta); } catch { /* Reads still select the newer accepted operation. */ }
+    }
+    throw new AppError(409, "Một lần tạo mới hơn đã hoàn tất trên thiết bị khác. Mở học liệu hiện hành để tiếp tục.", "GENERATION_SUPERSEDED");
+  }
+  for (const meta of files) {
+    if (meta.appProperties?.documentId !== accepted.documentId || meta.appProperties?.artifactKind !== accepted.kind ||
+        meta.appProperties?.artifactId === accepted.id || artifactOrder(meta) >= rank) continue;
+    try {
+      // Delete dependent attempts only for exactly the superseded quiz identity.
+      if (accepted.kind === "quiz") {
+        let pageToken: string | undefined;
+        const obsoleteAttempts: AppDataMeta[] = [];
+        do {
+          const attempts = await listAppData(accessToken, { kind: "attempt", documentId: accepted.documentId,
+            artifactId: meta.appProperties.artifactId, pageSize: 100, pageToken });
+          for (const attempt of attempts.files || []) {
+            if (attempt.appProperties?.artifactId === meta.appProperties.artifactId &&
+                attempt.appProperties?.documentId === accepted.documentId) obsoleteAttempts.push(attempt);
+          }
+          pageToken = attempts.nextPageToken;
+        } while (pageToken);
+        for (const attempt of obsoleteAttempts) await deleteAppData(accessToken, attempt);
+      }
+      await deleteAppData(accessToken, meta);
+    } catch { console.warn("artifact_cleanup_deferred", { kind: accepted.kind }); }
+  }
+}
+
+export async function beginGeneration(subject: string, accessToken: string,
+  input: Pick<GenerationOperation, "id" | "documentId" | "sourceMd5" | "kind">): Promise<GenerationOperation> {
+  if (!input || !/^[0-9a-f-]{36}$/i.test(input.id) || !["summary", "quiz"].includes(input.kind)) throw new AppError(400, "Yêu cầu tạo học liệu không hợp lệ.");
+  await getDocumentRecord(accessToken, input.documentId);
+  const file = await checkedPdf(accessToken, input.documentId);
+  if (file.md5Checksum !== input.sourceMd5) throw new AppError(409, "PDF đã thay đổi. Mở lại tài liệu trước khi tạo học liệu.");
+  let meta = await findAppData(accessToken, `generation-${input.id}.json`);
+  if (!meta) {
+    const record: GenerationOperation = { schema: 1, ...input, subject, startedAt: new Date().toISOString() };
+    meta = await createAppData(accessToken, `generation-${input.id}.json`, record,
+      { kind: "generation", documentId: input.documentId, sourceMd5: input.sourceMd5, operationId: input.id });
+  }
+  return generationOperation(subject, accessToken, input, meta);
+}
+
+export async function generationOperation(subject: string, accessToken: string,
+  input: Pick<GenerationOperation, "id" | "documentId" | "sourceMd5" | "kind">, known?: AppDataMeta): Promise<GenerationOperation> {
+  const meta = known || await findAppData(accessToken, `generation-${input.id}.json`);
+  if (!meta || meta.appProperties?.kind !== "generation") throw new AppError(409, "Phiên tạo học liệu chưa được khởi tạo. Tải lại trang và thử lại.");
+  const operation = await readAppData<GenerationOperation>(accessToken, meta.id);
+  if (operation.subject !== subject || operation.id !== input.id || operation.documentId !== input.documentId ||
+      operation.sourceMd5 !== input.sourceMd5 || operation.kind !== input.kind || !meta.createdTime) {
+    throw new AppError(409, "Phiên tạo học liệu không khớp tài khoản hoặc tài liệu.");
+  }
+  return { ...operation, startedAt: meta.createdTime };
 }
 
 export async function getArtifact(accessToken: string, artifactId: string): Promise<ArtifactRecord> {
@@ -136,9 +222,23 @@ export async function getArtifact(accessToken: string, artifactId: string): Prom
 }
 
 export async function saveAttempt(accessToken: string, attempt: Omit<AttemptRecord, "id" | "createdAt">): Promise<AttemptRecord> {
+  const assertCurrent = async () => {
+    const current = (await listArtifacts(accessToken, attempt.documentId)).find((item) => item.kind === "quiz");
+    if (!current || current.id !== attempt.artifactId) throw new AppError(409, "Bộ câu hỏi này đã được thay thế. Mở bộ hiện hành để làm bài mới.");
+  };
+  await assertCurrent();
   const full: AttemptRecord = { ...attempt, id: randomUUID(), createdAt: new Date().toISOString() };
-  await createAppData(accessToken, `attempt-${full.id}.json`, full,
+  const meta = await createAppData(accessToken, `attempt-${full.id}.json`, full,
     { kind: "attempt", documentId: full.documentId, artifactId: full.artifactId }, "Quiz attempt");
+  try { await assertCurrent(); }
+  catch (error) {
+    // Close the common replacement-during-submit race. Never delete another attempt.
+    if (error instanceof AppError && error.status === 409) {
+      try { await deleteAppData(accessToken, meta); } catch { console.warn("attempt_cleanup_deferred"); }
+      throw error;
+    }
+    // A successfully saved attempt is still saved when a reconciliation read fails.
+  }
   return full;
 }
 

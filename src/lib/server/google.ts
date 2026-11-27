@@ -93,7 +93,7 @@ export async function driveFile(accessToken: string, id: string): Promise<DriveF
 }
 
 export type AppDataMeta = {
-  id: string; name: string; description?: string; modifiedTime?: string;
+  id: string; name: string; description?: string; modifiedTime?: string; createdTime?: string;
   appProperties?: Record<string, string>;
 };
 
@@ -109,7 +109,7 @@ export async function listAppData(accessToken: string, filters: { kind?: string;
   if (filters.quotaDay) clauses.push(`appProperties has { key='quotaDay' and value=${quote(filters.quotaDay)} }`);
   if (filters.name) clauses.push(`name = ${quote(filters.name)}`);
   url.searchParams.set("q", clauses.join(" and "));
-  url.searchParams.set("fields", "nextPageToken,files(id,name,description,modifiedTime,appProperties)");
+  url.searchParams.set("fields", "nextPageToken,files(id,name,description,createdTime,modifiedTime,appProperties)");
   url.searchParams.set("pageSize", String(Math.min(1000, Math.max(1, filters.pageSize || 100))));
   if (filters.orderBy) url.searchParams.set("orderBy", filters.orderBy);
   if (filters.pageToken) url.searchParams.set("pageToken", filters.pageToken);
@@ -118,7 +118,7 @@ export async function listAppData(accessToken: string, filters: { kind?: string;
 }
 
 export async function findAppData(accessToken: string, name: string): Promise<AppDataMeta | null> {
-  const result = await listAppData(accessToken, { name, pageSize: 2 });
+  const result = await listAppData(accessToken, { name, pageSize: 2, orderBy: "createdTime asc" });
   return result.files?.[0] || null;
 }
 
@@ -143,10 +143,19 @@ export async function createAppData(accessToken: string, name: string, value: un
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${json}\r\n--${boundary}--`;
   const url = new URL("https://www.googleapis.com/upload/drive/v3/files");
   url.searchParams.set("uploadType", "multipart");
-  url.searchParams.set("fields", "id,name,description,modifiedTime,appProperties");
+  url.searchParams.set("fields", "id,name,description,createdTime,modifiedTime,appProperties");
   const response = await driveFetch(accessToken, url, { method: "POST", headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
     body, signal: AbortSignal.timeout(30_000) });
   return response.json() as Promise<AppDataMeta>;
+}
+
+export async function deleteAppData(accessToken: string, meta: AppDataMeta): Promise<void> {
+  if (!/^[A-Za-z0-9_-]{8,160}$/.test(meta.id) || meta.appProperties?.app !== "margin-v1" ||
+      !["artifact", "attempt"].includes(meta.appProperties?.kind || "")) {
+    throw new AppError(400, "Không thể xóa bản ghi ngoài phạm vi học liệu.");
+  }
+  try { await driveFetch(accessToken, `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(meta.id)}`, { method: "DELETE" }); }
+  catch (error) { if (!(error instanceof AppError) || error.status !== 404) throw error; }
 }
 
 export async function updateAppData(accessToken: string, id: string, value: unknown): Promise<void> {
