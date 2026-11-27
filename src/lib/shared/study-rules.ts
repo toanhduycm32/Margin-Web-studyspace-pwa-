@@ -1,17 +1,18 @@
 import type { ResponseType } from "./types";
 
-export const STUDY_RULE_VERSION = "2026-11-27-medical-2";
+export const STUDY_RULE_VERSION = "2026-11-27-medical-3";
 
 export type StudyDomain = "general" | "medical" | "dental";
 
 // Require several independent signals: an isolated mention of a patient or tooth does not
 // turn an unrelated document into a clinical source. This classification is planning only.
 const domainSignals = {
-  dental: /\b(?:dentistry|dental|tooth|teeth|pulpitis|periodont|endodont|caries|gingiv|occlus|oral cavity|nha khoa|răng|nướu|tủy răng|sâu răng)\b/giu,
-  medical: /\b(?:medicine|medical|patients?|diagnos\w*|symptom\w*|disease\w*|treatment\w*|therapy|clinical|patholog\w*|physiolog\w*|pharmacolog\w*|contraindicat\w*|ferritin|anemia|iron deficiency|inflammation|infection|y khoa|bệnh nhân|chẩn đoán|điều trị|triệu chứng|bệnh học|dược lý)\b/giu,
+  dental: /(?<![\p{L}\p{N}_])(?:dentistry|dental|tooth|teeth|pulpitis|periodont\w*|endodont\w*|caries|gingiv\w*|occlus\w*|oral cavity|nha khoa|răng|nướu|tủy răng|sâu răng)(?![\p{L}\p{N}_])/giu,
+  medical: /(?<![\p{L}\p{N}_])(?:medicine|medical|patients?|diagnos\w*|symptom\w*|disease\w*|treatment\w*|therapy|clinical|patholog\w*|physiolog\w*|pharmacolog\w*|contraindicat\w*|ferritin|anemia|iron deficiency|inflammation|infection|y khoa|bệnh nhân|chẩn đoán|điều trị|triệu chứng|bệnh học|dược lý)(?![\p{L}\p{N}_])/giu,
 };
 
 export function classifyStudyDomain(text: string): StudyDomain {
+  text = text.normalize("NFC");
   const dental = (text.match(domainSignals.dental) || []).length;
   const medical = (text.match(domainSignals.medical) || []).length;
   if (dental >= 3 && dental >= medical * 0.35) return "dental";

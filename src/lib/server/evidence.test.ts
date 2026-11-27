@@ -4,6 +4,10 @@ import { publicEvidenceQuery, retrieveEvidence } from "./evidence";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("public research lookup", () => {
+  it("recognizes an accented Vietnamese topic without changing its privacy boundary", () => {
+    expect(publicEvidenceQuery("Chẩn đoán đái tháo đường", "medical")).toBe("diabetes mellitus management");
+    expect(publicEvidenceQuery("Chẩn đoán đái tháo đường".normalize("NFD"), "medical")).toBe("diabetes mellitus management");
+  });
   it("sends only a fixed public topic, not private PDF text", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ resultList: { result: [{
       source: "MED", id: "12345678", title: "A review of pulpitis", pubYear: "2024",

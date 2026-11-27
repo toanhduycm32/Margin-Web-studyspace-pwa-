@@ -5,18 +5,18 @@ export type EvidenceSource = { title: string; year: string; url: string; abstrac
 // Only these public, broad topic strings leave the server. Never put PDF text, a patient
 // vignette, a document title, or user data in the external search URL.
 const topics: Array<{ match: RegExp; query: string; domain: StudyDomain }> = [
-  { match: /\b(?:pulpitis|tủy răng)\b/iu, query: "irreversible pulpitis", domain: "dental" },
-  { match: /\b(?:caries|sâu răng)\b/iu, query: "dental caries", domain: "dental" },
-  { match: /\b(?:periodont|nha chu)\w*/iu, query: "periodontal disease", domain: "dental" },
-  { match: /\b(?:antibiotic|kháng sinh)\w*/iu, query: "dental antibiotic prescribing", domain: "dental" },
-  { match: /\b(?:iron deficiency|thiếu máu thiếu sắt)\b/iu, query: "iron deficiency anemia", domain: "medical" },
-  { match: /\b(?:hypertension|tăng huyết áp)\b/iu, query: "hypertension management", domain: "medical" },
-  { match: /\b(?:diabetes|đái tháo đường)\b/iu, query: "diabetes mellitus management", domain: "medical" },
-  { match: /\b(?:asthma|hen phế quản)\b/iu, query: "asthma management", domain: "medical" },
+  { match: /(?<![\p{L}\p{N}_])(?:pulpitis|tủy răng)(?![\p{L}\p{N}_])/iu, query: "irreversible pulpitis", domain: "dental" },
+  { match: /(?<![\p{L}\p{N}_])(?:caries|sâu răng)(?![\p{L}\p{N}_])/iu, query: "dental caries", domain: "dental" },
+  { match: /(?<![\p{L}\p{N}_])(?:periodont\w*|nha chu)(?![\p{L}\p{N}_])/iu, query: "periodontal disease", domain: "dental" },
+  { match: /(?<![\p{L}\p{N}_])(?:antibiotic\w*|kháng sinh)(?![\p{L}\p{N}_])/iu, query: "dental antibiotic prescribing", domain: "dental" },
+  { match: /(?<![\p{L}\p{N}_])(?:iron deficiency|thiếu máu thiếu sắt)(?![\p{L}\p{N}_])/iu, query: "iron deficiency anemia", domain: "medical" },
+  { match: /(?<![\p{L}\p{N}_])(?:hypertension|tăng huyết áp)(?![\p{L}\p{N}_])/iu, query: "hypertension management", domain: "medical" },
+  { match: /(?<![\p{L}\p{N}_])(?:diabetes|đái tháo đường)(?![\p{L}\p{N}_])/iu, query: "diabetes mellitus management", domain: "medical" },
+  { match: /(?<![\p{L}\p{N}_])(?:asthma|hen phế quản)(?![\p{L}\p{N}_])/iu, query: "asthma management", domain: "medical" },
 ];
 
 export function publicEvidenceQuery(source: string, domain: StudyDomain): string | null {
-  return topics.find((topic) => topic.domain === domain && topic.match.test(source))?.query || null;
+  return topics.find((topic) => topic.domain === domain && topic.match.test(source.normalize("NFC")))?.query || null;
 }
 
 export async function retrieveEvidence(source: string, domain: StudyDomain): Promise<EvidenceSource[]> {

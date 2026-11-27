@@ -29,6 +29,11 @@ describe("study blueprint and summary profiles", () => {
     expect(sectionWordTarget("deep", 8000)).toBeGreaterThan(sectionWordTarget("concise", 8000));
     expect(Object.keys(SUMMARY_PROFILES)).toEqual(["concise", "academic", "deep", "revision", "clinical"]);
   });
+  it("recognizes Vietnamese clinical terms with accented word endings", () => {
+    expect(classifyStudyDomain("Điều trị, dược lý, bệnh nhân và chẩn đoán.")).toBe("medical");
+    expect(classifyStudyDomain("Điều trị, dược lý, bệnh nhân và chẩn đoán.".normalize("NFD"))).toBe("medical");
+    expect(classifyStudyDomain("Periodontal disease, endodontic treatment and gingival inflammation.")).toBe("dental");
+  });
   it("plans a substantial medical bank without overloading a single request", () => {
     const chunks = Array.from({ length: 20 }, (_, index) => ({ sectionId: `section-${index + 1}`,
       characters: 12_000, conceptSignals: 14 }));

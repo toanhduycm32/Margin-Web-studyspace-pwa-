@@ -14,9 +14,9 @@ function fromMarkers(markers: Marker[], pageCount: number): DocumentSection[] {
     .sort((a, b) => a.page - b.page);
   const selected: Marker[] = [];
   for (const marker of ordered) {
-    if (selected.length && marker.page - selected.at(-1)!.page < 2) continue;
+    if (selected.length && marker.page === selected.at(-1)!.page) continue;
     selected.push(marker);
-    if (selected.length >= 40) break;
+    if (selected.length > 80) throw new Error("This PDF has more than 80 major sections. No partial resource was created.");
   }
   if (!selected.length) return [];
   if (selected[0].page > 1) selected.unshift({ page: 1, title: "Opening pages (inferred division)", source: "heading" });
@@ -38,7 +38,7 @@ export function detectHeadingSections(pages: TextPage[]): DocumentSection[] {
     seen.add(heading.toLocaleLowerCase());
     markers.push({ page: page.page, title: heading, source: "heading" });
   }
-  return markers.length >= 2 ? fromMarkers(markers, pages.length) : [];
+  return markers.length ? fromMarkers(markers, pages.length) : [];
 }
 
 async function outlineMarkers(pdf: PDFDocumentProxy): Promise<Marker[]> {
@@ -46,13 +46,15 @@ async function outlineMarkers(pdf: PDFDocumentProxy): Promise<Marker[]> {
   if (!outline?.length) return [];
   const major = outline.length === 1 && outline[0].items?.length ? outline[0].items! : outline;
   const markers: Marker[] = [];
-  for (const item of major.slice(0, 80)) {
+  for (const item of major) {
     const title = cleanTitle(item.title || "");
     if (!title || !item.dest) continue;
     try {
       const destination = typeof item.dest === "string" ? await pdf.getDestination(item.dest) : item.dest;
-      if (!Array.isArray(destination) || !destination[0]) continue;
-      const index = await pdf.getPageIndex(destination[0] as Parameters<PDFDocumentProxy["getPageIndex"]>[0]);
+      if (!Array.isArray(destination) || destination[0] == null) continue;
+      const index = typeof destination[0] === "number" ? destination[0]
+        : await pdf.getPageIndex(destination[0] as Parameters<PDFDocumentProxy["getPageIndex"]>[0]);
+      if (!Number.isInteger(index) || index < 0) continue;
       markers.push({ page: index + 1, title, source: "outline" });
     } catch { /* A broken PDF bookmark must not block text extraction. */ }
   }
@@ -62,10 +64,10 @@ async function outlineMarkers(pdf: PDFDocumentProxy): Promise<Marker[]> {
 export async function documentSections(pdf: PDFDocumentProxy, pages: TextPage[]): Promise<DocumentSection[]> {
   let markers: Marker[] = [];
   try { markers = await outlineMarkers(pdf); } catch { /* Fall back to text headings. */ }
-  const fromOutline = markers.length >= 2 ? fromMarkers(markers, pages.length) : [];
-  if (fromOutline.length >= 2) return fromOutline;
+  const fromOutline = markers.length ? fromMarkers(markers, pages.length) : [];
+  if (fromOutline.length) return fromOutline;
   const fromText = detectHeadingSections(pages);
-  if (fromText.length >= 2) return fromText;
+  if (fromText.length) return fromText;
   // No source heading evidence: expose the uncertainty instead of inventing chapters.
   const width = Math.max(1, Math.ceil(pages.length / Math.min(8, Math.ceil(pages.length / 12))));
   const result: DocumentSection[] = [];
