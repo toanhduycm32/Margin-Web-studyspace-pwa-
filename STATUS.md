@@ -1,6 +1,6 @@
 # Build status — 2026-11-27
 
-## 2026-11-27 final-use verification (in progress)
+## 2026-11-27 final-use verification
 
 Bound to workflow v4.103 and app revision `490b1b6` at entry. The owner requested a careful final check before use. An existing Chrome session authenticated to production and loaded the owner's private library. Opening the language-learning PDF failed with `Google Drive returned an unexpected PDF byte range`. A new regression reproduced that exact message: PDF.js can coalesce adjacent ranges beyond the API's 2 MiB response cap. The client now splits these requests into 1 MiB HTTP transfers and reassembles the exact range expected by PDF.js. The original range checks and account-scoped server cache remain enforced.
 
@@ -12,7 +12,11 @@ Second publication `8e9a53c` reached Vercel success. The production summary now 
 
 The signed-in five-question medical fixture then failed with a generic message. Vercel logged an unexpected quiz-segment error after 81.9 seconds, not a function timeout. A live local replay of its exact extracted first page and three-item blueprint reproduced an incomplete/malformed collection after 99 seconds. The prompt supplied only a single-item example despite requesting three items. It now supplies the complete ordered array contract, including each item's own format and family. PDF line-wrap differences in quoted evidence are resolved to the original source span; altered words still fail. Exhausted known validation failures return a recoverable message and fixed diagnostic reason without logging source/model content. The same live first-page replay passed in 74.6 seconds after these changes. Rule version is now `2026-11-27-medical-4`.
 
-Local verification: 65 automated tests passed; two opt-in live evaluations were skipped in the normal suite. The separate live replay above used the real hosted service. TypeScript passed as part of the production build. Live post-deployment quiz, persistence and scoring checks are pending below. No claim of physical iPhone, two real concurrent accounts, or clinical expert validation is made.
+Third publication `a81332f` reached Vercel success; the production reader bundle contains rule version `2026-11-27-medical-4`. The authenticated production retest generated and saved all five questions across both medical/dental fixture pages. It included three select-all items, one select-two item and one single-best item. The original PDF remained readable while generation continued with the study panel closed. A source-based answer set scored 5/5; option feedback and source quotations appeared. After a full page reload the saved quiz reopened with “Last attempt: 5/5”, a blank new attempt, and changed option positions. The saved three-chapter summary also reopened from Drive after reload. The two clearly named verification PDFs and their learning records remain in the owner's Drive; temporary browser tabs were closed.
+
+Research mode was exercised but returned no relevant public abstracts; the saved quiz explicitly disclosed PDF-only grounding. Successful live external retrieval is therefore still unverified. Manual inspection of the fixture answer sets retained the key population, treatment-availability and inflammation conditions, but the three dental items substantially overlap on the very short passage. This is functional/source-condition evidence, not proof of broad assessment diversity, clinical correctness on arbitrary documents, or expert validation.
+
+Local verification: 65 automated tests passed; two opt-in live evaluations were skipped in the normal suite. The separate live replay above used the real hosted service. TypeScript passed as part of the production build. The observed production PDF → AI → Drive → quiz scoring → reload workflow passed after the repairs. Physical iPhone/Home Screen performance, two real concurrent authorized accounts, large live 100–300-question banks, successful external research retrieval, and clinical expert review remain outstanding. No further credential or origin configuration change was made in this review.
 
 ## 2026-11-27 medical and dental learning upgrade
 
