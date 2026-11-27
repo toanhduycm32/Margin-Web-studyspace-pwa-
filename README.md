@@ -9,11 +9,11 @@ Margin supports **multiple explicitly authorized Google accounts** at the same U
 - Google OAuth with a verified-email allowlist, independent encrypted HTTP-only sessions, and token refresh.
 - Google Picker for selecting an existing PDF or uploading a new one to Drive.
 - PDF library, in-app continuous scrolling, lazy page rendering, and saved reading position.
-- Whole-PDF text extraction, section-aware summaries in four styles, source-backed mixed-format quizzes, exact-set scoring, and saved attempts.
+- Whole-PDF text extraction, section-aware summaries in five styles, source-backed medical/dental assessment rules, variable-size question banks, shuffled answer positions per attempt, exact-set scoring, and saved attempts.
 - Drive `appDataFolder` storage for library references, intermediate results, artifacts, attempts, and reading progress.
 - Installable web app manifest and iPhone Home Screen icons.
 
-PDF pages without extractable text are reported. The app does not perform OCR or interpret images and diagrams. It refuses to save a partial result when the PDF exceeds its processing limit (5,000 pages, 80 segments, or 250 MB). It sends extracted PDF text to the configured NVIDIA API when you request a summary or quiz. Summaries use Concise, Academic (default), Deep study, or Revision notes rules. Quizzes mix single-best, select-all, and select-N questions; about 70% require multiple correct selections by default. A separate model audit checks generated answers, while human review remains necessary for educational accuracy.
+PDF pages without extractable text are reported. The app does not perform OCR or interpret images and diagrams. It refuses to save a partial result when the PDF exceeds its processing limit (5,000 pages, 80 segments, or 250 MB). It sends extracted PDF text to the configured NVIDIA API when you request a summary or quiz. Summaries use Quick, Academic (default), Deep medical study, Exam revision, or Clinical review rules. Quizzes mix single-best, select-all, and select-N questions; about 75% require multiple correct selections by default. Suggested bank size uses readable source density, and explicit choices extend to 300 when the PDF has sufficient distinct readable segments. A separate model audit checks generated answers, while human review remains necessary for educational accuracy.
 
 ## Run locally on Windows
 
@@ -33,7 +33,8 @@ PDF pages without extractable text are reported. The app does not perform OCR or
 | `NEXT_PUBLIC_GOOGLE_PICKER_API_KEY` | Google Picker browser API key. Public by design; restrict it to your site origins and Google Picker API. |
 | `NEXT_PUBLIC_GOOGLE_APP_ID` | Numeric Google Cloud project **number** for Picker, not the project ID. |
 | `NVIDIA_API_KEY` | NVIDIA API key. Server-side only. Reader works without it; summaries and quizzes do not. |
-| `NVIDIA_MODEL` | Optional; defaults to `nvidia/nemotron-3.5-lightning-30b-a3b`. |
+| `NVIDIA_MODEL` | Optional; primary model defaults to `mistralai/mistral-large-4-1t-a52b`. An old deployment still set to `nvidia/nemotron-3.5-lightning-30b-a3b` is treated as a legacy setting, so Mistral remains primary. Set this variable to the Mistral ID explicitly when editing production configuration. |
+| `NVIDIA_FALLBACK_MODEL` | Optional; defaults to `nvidia/nemotron-3.5-lightning-30b-a3b` for temporary Mistral timeout/provider failure. |
 | `AI_DAILY_CALL_LIMIT` | Optional per-user UTC-day model-call limit; default `200`, allowed `1`–`1000`. |
 | `AI_PROCESS_CONCURRENCY` | Optional simultaneous model calls per Node process; default `4`, allowed `1`–`16`. One call per user is always enforced per process. |
 
@@ -54,14 +55,16 @@ Official references: [OAuth web-server flow](https://developers.google.com/ident
 
 ## NVIDIA setup
 
-Create an API key in your NVIDIA account and set `NVIDIA_API_KEY` in `.env.local` and Vercel Production. The server calls NVIDIA's Chat Completions endpoint with reasoning enabled; the browser never receives this key. A per-user Drive usage ledger and process-local concurrency limits reduce abuse. **These are not atomic limits across Vercel instances**; check whether your NVIDIA account offers a provider-enforced cap and add a Vercel Firewall rule for the public AI routes. See [MULTI_USER_ARCHITECTURE.md](MULTI_USER_ARCHITECTURE.md).
+Use the existing `NVIDIA_API_KEY` in `.env.local` and Vercel Production. Mistral Large 4 is the primary model with `reasoning_effort: high`. If it times out or has a temporary provider error, the server uses Nemotron as a bounded fallback and records the model(s) used in the saved artifact. Each provider call, including fallback and review, counts toward the user's daily limit. The browser never receives the key. A per-user Drive usage ledger and process-local concurrency limits reduce abuse. **These are not atomic limits across Vercel instances**; check whether your NVIDIA account offers a provider-enforced cap and add a Vercel Firewall rule for the public AI routes. See [MULTI_USER_ARCHITECTURE.md](MULTI_USER_ARCHITECTURE.md).
+
+The optional **public research** checkbox searches Europe PMC for one of a fixed set of broad medical/dental topics. It does not send PDF text, document titles, or patient details in the search query. Retrieved abstracts are a limited cross-check, not complete guidelines; the app lists the references it actually consulted. If retrieval fails or no supported topic matches, the resource remains PDF-grounded and says so.
 
 ## Deploy for iPhone access
 
 The deployed origin is `https://margin-web-studyspace-pwa.vercel.app`; your PC need not stay on. Both authorized emails are configured. A real simultaneous two-account AI check still needs both users' interactive sessions.
 
 1. This app is published as the root of its own Git repository. Keep `.env.local`, `node_modules`, and `.next` out of Git (already ignored). If deploying from the original larger workspace instead, set the hosting **Root Directory** to `pdf-reader-ai`.
-2. In the existing Vercel project's **Settings → Environment Variables → Production**, add `AUTHORIZED_GOOGLE_EMAILS` with both real emails separated by a comma. Keep the existing `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, Picker values, and NVIDIA key. Set/confirm `APP_ORIGIN=https://margin-web-studyspace-pwa.vercel.app`. `AI_DAILY_CALL_LIMIT=200` and `AI_PROCESS_CONCURRENCY=4` are optional explicit defaults. You may remove `OWNER_EMAIL` after the new allowlist is active.
+2. In the existing Vercel project's **Settings → Environment Variables → Production**, keep the verified two-user `AUTHORIZED_GOOGLE_EMAILS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, Picker values, and NVIDIA key. Set/confirm `APP_ORIGIN=https://margin-web-studyspace-pwa.vercel.app` and set `NVIDIA_MODEL=mistralai/mistral-large-4-1t-a52b`; `NVIDIA_FALLBACK_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b` is optional. The code also migrates the old Nemotron `NVIDIA_MODEL` value to Mistral primary until you update this setting. `AI_DAILY_CALL_LIMIT=200` and `AI_PROCESS_CONCURRENCY=4` are optional explicit defaults. You may remove `OWNER_EMAIL` after the new allowlist is active.
 3. Redeploy after changing Vercel environment variables; they do not change an existing deployment. An already-listed user can sign in again from another device without editing Vercel settings. To add a **new** user later, update the allowlist and redeploy; while Google consent is in Testing, add that user to Google's test-user list too.
    For an additional edge guard, open **Vercel project → Firewall → Configure → New Rule**: condition **Path starts with `/api/ai/`**, action **Rate limit, 60 requests per minute per IP, then return 429**; review and publish the rule. Check the Firewall overview after two real users test it, since two people behind one IP share that limit. The application allowlist and per-user Drive quota remain the primary access controls.
 4. Test each account in an independent browser profile or device at the same HTTPS URL: connect, pick or upload a PDF, read, generate a short summary and quiz, reload saved resources, and confirm the other account cannot see them. Test both sessions at the same time.

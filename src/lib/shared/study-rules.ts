@@ -1,10 +1,27 @@
 import type { ResponseType } from "./types";
 
-export const STUDY_RULE_VERSION = "2026-11-25-1";
+export const STUDY_RULE_VERSION = "2026-11-27-medical-1";
+
+export type StudyDomain = "general" | "medical" | "dental";
+
+// Require several independent signals: an isolated mention of a patient or tooth does not
+// turn an unrelated document into a clinical source. This classification is planning only.
+const domainSignals = {
+  dental: /\b(?:dentistry|dental|tooth|teeth|pulpitis|periodont|endodont|caries|gingiv|occlus|oral cavity|nha khoa|răng|nướu|tủy răng|sâu răng)\b/giu,
+  medical: /\b(?:medicine|medical|patients?|diagnos\w*|symptom\w*|disease\w*|treatment\w*|therapy|clinical|patholog\w*|physiolog\w*|pharmacolog\w*|contraindicat\w*|ferritin|anemia|iron deficiency|inflammation|infection|y khoa|bệnh nhân|chẩn đoán|điều trị|triệu chứng|bệnh học|dược lý)\b/giu,
+};
+
+export function classifyStudyDomain(text: string): StudyDomain {
+  const dental = (text.match(domainSignals.dental) || []).length;
+  const medical = (text.match(domainSignals.medical) || []).length;
+  if (dental >= 3 && dental >= medical * 0.35) return "dental";
+  if (medical >= 4 || dental >= 3) return "medical";
+  return "general";
+}
 
 export const SUMMARY_PROFILES = {
   concise: {
-    label: "Concise",
+    label: "Quick",
     purpose: "Fast review",
     audience: "A learner revisiting material already read",
     voice: "Direct, neutral, information-dense",
@@ -40,7 +57,7 @@ export const SUMMARY_PROFILES = {
     exceptions: "Scale down for sparse sections and up for unusually dense sections without padding.",
   },
   deep: {
-    label: "Deep study",
+    label: "Deep medical study",
     purpose: "Understanding difficult technical material",
     audience: "A learner who needs mechanisms and intermediate reasoning",
     voice: "Analytical and pedagogically explanatory",
@@ -58,7 +75,7 @@ export const SUMMARY_PROFILES = {
     exceptions: "Do not invent a worked example or lengthen thin material to meet a target.",
   },
   revision: {
-    label: "Revision notes",
+    label: "Exam revision",
     purpose: "Efficient recall and retrieval",
     audience: "A learner reviewing before practice",
     voice: "Compact and exact",
@@ -74,6 +91,24 @@ export const SUMMARY_PROFILES = {
     attribution: "Ground each note in the supplied page range and label inferred headings.",
     validation: "Check accuracy, recall usefulness, necessary qualifications and redundancy.",
     exceptions: "A thin section may use fewer words than the nominal target.",
+  },
+  clinical: {
+    label: "Clinical review",
+    purpose: "Explain source-supported clinical reasoning for study",
+    audience: "A medical or dental learner reviewing mechanisms and decisions",
+    voice: "Careful, conditional and evidence-aware",
+    tone: "Clinical education, never patient-specific advice",
+    minWords: 180, baseWords: 330, maxWords: 530,
+    depth: "Connect presentation, mechanism, differential, investigation and management only where the source supports each link.",
+    terminology: "Preserve exact disease, anatomy, test and intervention terms; define ambiguous abbreviations from the source.",
+    formulas: "Keep supported thresholds, units and calculations together with population and conditions.",
+    examples: "Explain source cases as educational examples; do not invent patient findings.",
+    assumptions: "Keep age, setting, severity, contraindications, exclusions and time course when they change interpretation.",
+    limitations: "Label uncertainty, dated recommendations, missing visual findings and absent evidence explicitly.",
+    format: "Use concise sections for presentation, reasoning, investigations and management only when supported; otherwise explain the available concepts.",
+    attribution: "Separate what the PDF says from any external evidence; never invent a guideline or page citation.",
+    validation: "Check every clinical action against its stated population, indication and exception.",
+    exceptions: "Do not force a diagnosis or treatment pathway into basic science material.",
   },
 } as const;
 
@@ -98,7 +133,12 @@ export function summaryInstruction(profile: SummaryProfile): string {
 }
 
 export const QUESTION_FAMILIES = ["definition", "mechanism", "application", "comparison",
-  "assumption", "error_analysis", "boundary_condition", "cross_concept"] as const;
+  "assumption", "error_analysis", "boundary_condition", "cross_concept",
+  "clinical_presentation", "diagnostic_reasoning", "investigation", "management",
+  "contraindication", "integrated_case"] as const;
+
+export const CLINICAL_FAMILIES = ["mechanism", "clinical_presentation", "diagnostic_reasoning",
+  "investigation", "management", "contraindication", "integrated_case"] as const;
 
 export const QUESTION_FAMILY_RULES: Record<typeof QUESTION_FAMILIES[number], string> = {
   definition: "Test a source-defined term or distinction, not an isolated word match; use confusions with neighboring terms as distractors.",
@@ -109,11 +149,17 @@ export const QUESTION_FAMILY_RULES: Record<typeof QUESTION_FAMILIES[number], str
   error_analysis: "Present a plausible learner error and ask what is wrong or how to correct it; distractors should reflect other realistic errors.",
   boundary_condition: "Test where a rule stops applying or what limitation changes the conclusion; avoid obscure exceptions absent from the source.",
   cross_concept: "Connect two source-supported ideas with an explicit reasoning bridge; do not invent a relationship the source cannot support.",
+  clinical_presentation: "Use supported signs, symptoms and time course to test recognition; do not add unprovided discriminating findings.",
+  diagnostic_reasoning: "Require a differential or diagnosis justified by the stated presentation, test findings and population; state missing information when decisive.",
+  investigation: "Ask what a supported test establishes or fails to establish; preserve test timing, units and interpretation limits.",
+  management: "Test a source-supported management principle with its indication, population, setting and alternatives; never imply universal treatment.",
+  contraindication: "Test a supported exclusion, adverse effect or safety condition; distinguish absolute from conditional limitations.",
+  integrated_case: "Connect two or more supported clinical concepts in a short educational case without inventing a medically consequential premise.",
 };
 
 export function responseTargets(count: number): ResponseType[] {
-  const all = Math.round(count * 0.5);
-  const selectN = Math.round(count * 0.2);
+  const all = Math.round(count * 0.6);
+  const selectN = Math.round(count * 0.15);
   const remaining = count - all - selectN;
   const pool: ResponseType[] = [
     ...Array<ResponseType>(all).fill("select_all"),
@@ -135,11 +181,24 @@ function interleave(pool: ResponseType[]): ResponseType[] {
 
 export type BlueprintChunk = { sectionId: string; characters: number; conceptSignals: number };
 
-export function allocateQuizBlueprint(chunks: BlueprintChunk[], count: number): Array<{ formats: ResponseType[]; families: string[] }> {
+export function recommendedQuestionCount(chunks: BlueprintChunk[]): number {
+  const readable = chunks.filter((chunk) => chunk.characters >= 40);
+  if (!readable.length) return 0;
+  const characters = readable.reduce((total, chunk) => total + chunk.characters, 0);
+  const concepts = readable.reduce((total, chunk) => total + Math.min(20, chunk.conceptSignals), 0);
+  const sections = new Set(readable.map((chunk) => chunk.sectionId)).size;
+  // Conservative capacity estimate; it is a suggested bank size, never a quality guarantee.
+  return Math.min(300, readable.length * 10, Math.max(5, Math.round(Math.min(characters / 1200, concepts * 2 + sections * 6))));
+}
+
+export function allocateQuizBlueprint(chunks: BlueprintChunk[], count: number, domain: StudyDomain = "general"): Array<{ formats: ResponseType[]; families: string[] }> {
   if (!chunks.length || count < 1) throw new Error("A readable PDF is required.");
   const result = chunks.map(() => ({ formats: [] as ResponseType[], families: [] as string[] }));
   const sectionOrder = [...new Set(chunks.filter((chunk) => chunk.characters > 0).map((chunk) => chunk.sectionId))];
   if (!sectionOrder.length) throw new Error("No readable PDF text was found. OCR is needed.");
+  if (count > chunks.filter((chunk) => chunk.characters > 0).length * 10) {
+    throw new Error("This PDF needs more distinct readable sections for that many reliable questions. Choose a smaller bank.");
+  }
   const sectionWeight = sectionOrder.map((id) => chunks.reduce((sum, chunk) => chunk.sectionId === id
     ? sum + Math.sqrt(Math.max(1, chunk.characters)) * (1 + Math.min(0.5, chunk.conceptSignals / 10)) : sum, 0));
   const sectionSlots = sectionOrder.map(() => 0);
@@ -149,10 +208,15 @@ export function allocateQuizBlueprint(chunks: BlueprintChunk[], count: number): 
     let section = 0;
     if (slot < sectionOrder.length && count >= sectionOrder.length) section = slot;
     else for (let index = 1; index < sectionOrder.length; index++) {
-      if (sectionWeight[index] / (sectionSlots[index] + 1) > sectionWeight[section] / (sectionSlots[section] + 1)) section = index;
+      const hasSpace = chunks.some((chunk, chunkIndex) => chunk.sectionId === sectionOrder[index] && chunk.characters > 0 && chunkSlots[chunkIndex] < 10);
+      const currentSpace = chunks.some((chunk, chunkIndex) => chunk.sectionId === sectionOrder[section] && chunk.characters > 0 && chunkSlots[chunkIndex] < 10);
+      if (hasSpace && (!currentSpace || sectionWeight[index] / (sectionSlots[index] + 1) > sectionWeight[section] / (sectionSlots[section] + 1))) section = index;
+    }
+    if (!chunks.some((chunk, chunkIndex) => chunk.sectionId === sectionOrder[section] && chunk.characters > 0 && chunkSlots[chunkIndex] < 10)) {
+      section = sectionOrder.findIndex((id) => chunks.some((chunk, chunkIndex) => chunk.sectionId === id && chunk.characters > 0 && chunkSlots[chunkIndex] < 10));
     }
     sectionSlots[section]++;
-    const candidates = chunks.map((chunk, index) => chunk.sectionId === sectionOrder[section] && chunk.characters > 0 ? index : -1).filter((index) => index >= 0);
+    const candidates = chunks.map((chunk, index) => chunk.sectionId === sectionOrder[section] && chunk.characters > 0 && chunkSlots[index] < 10 ? index : -1).filter((index) => index >= 0);
     let chosen = candidates[0];
     for (const index of candidates.slice(1)) {
       const value = Math.sqrt(Math.max(1, chunks[index].characters)) * (1 + Math.min(0.5, chunks[index].conceptSignals / 10)) / (chunkSlots[index] + 1);
@@ -161,7 +225,8 @@ export function allocateQuizBlueprint(chunks: BlueprintChunk[], count: number): 
     }
     chunkSlots[chosen]++;
     result[chosen].formats.push(formats[slot]);
-    result[chosen].families.push(QUESTION_FAMILIES[slot % QUESTION_FAMILIES.length]);
+    const families = domain === "general" ? QUESTION_FAMILIES.slice(0, 8) : CLINICAL_FAMILIES;
+    result[chosen].families.push(families[slot % families.length]);
   }
   return result;
 }

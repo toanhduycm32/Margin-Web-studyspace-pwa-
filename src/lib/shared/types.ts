@@ -25,6 +25,8 @@ export type LegacyQuizQuestion = {
 };
 
 export type ResponseType = "single_best" | "select_all" | "select_n";
+export type EvidenceMode = "pdf" | "research";
+export type EvidenceReference = { title: string; year: string; url: string };
 export type QuizQuestionV2 = {
   id: string;
   responseType: ResponseType;
@@ -67,6 +69,9 @@ export type ArtifactRecord = {
   summaryProfile?: string;
   sections?: DocumentSection[];
   assessedSectionIds?: string[];
+  evidenceMode?: EvidenceMode;
+  evidenceReferences?: EvidenceReference[];
+  modelsUsed?: string[];
   payload: { text: string } | { questions: QuizQuestion[] };
 };
 
@@ -103,6 +108,9 @@ export type MapRecord = {
   plannedFamilies?: string[];
   digest?: string;
   questions?: QuizQuestion[];
+  evidenceMode?: EvidenceMode;
+  evidenceReferences?: EvidenceReference[];
+  modelsUsed?: string[];
 };
 
 export type SignedMap = { map: MapRecord; signature: string };

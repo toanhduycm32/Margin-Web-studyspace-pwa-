@@ -9,7 +9,7 @@ export const maxDuration = 300;
 
 export async function POST(request: Request) {
   return withSession(request, async (session) => {
-    const body = await readJsonBody<FinalizeInput>(request, 750_000);
+    const body = await readJsonBody<FinalizeInput>(request, 2_000_000);
     if (!body) throw new AppError(400, "Invalid completion request.");
     try { return Response.json({ artifact: await finalize(session, body) }); }
     catch (error) { logAiFailure("finalize", session.sub, body.operationId, error); throw error; }

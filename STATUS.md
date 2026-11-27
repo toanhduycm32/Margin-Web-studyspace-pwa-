@@ -1,4 +1,14 @@
-# Build status — 2026-11-24
+# Build status — 2026-11-27
+
+## 2026-11-27 medical and dental learning upgrade
+
+The latest medical/dental intelligence handoff was reconciled with the project workflow v4.102 and current standalone Margin app. The implementation now prefers NVIDIA Mistral Large 4 with model-specific `reasoning_effort: high`; the old production `NVIDIA_MODEL` value is interpreted as a legacy setting so it cannot silently prevent migration. A 45-second Mistral deadline and temporary provider failures use Nemotron as a bounded fallback. The saved artifact records the models that actually responded. The existing per-user Drive quota counts every primary and fallback call. Local ignored `.env.local` selects Mistral; no key or Google secret was placed in tracked files.
+
+Runtime source instructions now include medical/dental condition preservation, original item-writing examples, clinical question families, five distinct summary profiles, and stricter option auditing. A reviewer can request a targeted single-item replacement and re-audit the bank. Clinical validation rejects some unsupported named drugs, doses and durations. A suggested question count uses readable content and concept signals; explicit choices reach 300 when enough readable segments exist. Signed quiz batches remain recoverable. Each new quiz attempt shuffles display positions while server scoring keeps stable artifact option indices, including for old saved quizzes. A new optional research mode searches Europe PMC using only a fixed broad topic, never PDF text or user details; abstracts and citations are separated from PDF content, and unavailable evidence is disclosed.
+
+Local typecheck and the production build passed. The automated suite passed 53 tests, with two opt-in live evaluations skipped in the normal run. The existing NVIDIA key returned HTTP 200 for a short Mistral Large 4 reasoning probe, but a three-page high-reasoning operation timed out; hosted Mistral throughput was therefore not proven sufficient for long educational tasks. The full source-grounded summary plus mixed-format quiz test passed with the bounded fallback in about 178 seconds. A separate live medical/dental fallback evaluation passed in about 91 seconds using short paraphrases of the ADA dental antibiotic and WHO ferritin guidance; manual review found that its answer keys retained the key population, treatment-availability, inflammation and uncertainty conditions. These two small fixtures do not establish correctness on arbitrary PDFs or equivalence between Mistral and Nemotron. A direct local Europe PMC request timed out, so live external research retrieval remains unverified. Physical iPhone and simultaneous authenticated two-account runs also remain unverified.
+
+Publication and production revision verification: pending final source review and GitHub push.
 
 ## 2026-11-25 processing signature repair
 

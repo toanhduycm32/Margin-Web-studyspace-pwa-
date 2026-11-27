@@ -1,5 +1,5 @@
 import type { LegacyQuizQuestion, MapRecord, QuizQuestion, QuizQuestionV2, ResponseType } from "./types";
-import { QUESTION_FAMILIES } from "./study-rules";
+import { QUESTION_FAMILIES, classifyStudyDomain } from "./study-rules";
 
 const normalized = (text: string) => text.trim().toLocaleLowerCase().replace(/\s+/g, " ");
 
@@ -80,6 +80,15 @@ export function validateQuestionsV2(value: unknown, source: string, formats: Res
       throw new Error("Assessment item has invalid evidence, answers, explanations or response format.");
     }
     const stem = normalized(item.question);
+    if (classifyStudyDomain(source) !== "general") {
+      const sourceTerms = normalized(source);
+      const optionText = options.join(" ").toLowerCase();
+      const drugs = optionText.match(/\b(?:amoxicillin|penicillin|clindamycin|azithromycin|doxycycline|ibuprofen|naproxen|acetaminophen|paracetamol|metformin|insulin|warfarin|apixaban)\b/g) || [];
+      const regimens = optionText.match(/\b\d+(?:\.\d+)?[- ](?:mg|g|mcg|µg|days?|weeks?|months?|hours?)\b/g) || [];
+      if ([...drugs, ...regimens].some((detail) => !sourceTerms.includes(normalized(detail)))) {
+        throw new Error("Assessment item invented a clinical drug, dose or duration absent from the PDF source.");
+      }
+    }
     if (seen.has(stem)) throw new Error("Duplicate assessment items were generated.");
     seen.add(stem);
     return { id: `${startPage}-${endPage}-${index + 1}`, responseType: formats[index],

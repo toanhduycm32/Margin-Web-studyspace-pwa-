@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import type { DocumentSection, MapRecord, ResponseType, SignedMap } from "@/lib/shared/types";
+import type { DocumentSection, EvidenceMode, MapRecord, ResponseType, SignedMap } from "@/lib/shared/types";
 import { selectCoveredQuestions } from "@/lib/shared/quiz";
-import { QUESTION_FAMILIES, STUDY_RULE_VERSION, responseTargets, summaryProfile, type SummaryProfile } from "@/lib/shared/study-rules";
+import { QUESTION_FAMILIES, STUDY_RULE_VERSION, classifyStudyDomain, responseTargets, summaryProfile, type SummaryProfile } from "@/lib/shared/study-rules";
+import { retrieveEvidence } from "./evidence";
 import { signMap, verifyMap } from "./crypto";
 import { AppError } from "./errors";
 import { summarizeChunk, generateChunkQuestions, modelName } from "./nvidia";
@@ -28,9 +29,10 @@ export type ChunkInput = {
   wordTarget?: number;
   plannedFormats?: ResponseType[];
   plannedFamilies?: string[];
+  evidenceMode?: EvidenceMode;
 };
 
-const quizCounts = new Set([5, 10, 20, 30]);
+function validQuizCount(value: number): boolean { return Number.isInteger(value) && value >= 5 && value <= 300; }
 const operationPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function validSection(section: DocumentSection | undefined, pageCount: number, startPage: number, endPage: number): boolean {
@@ -51,12 +53,13 @@ function validChunk(input: ChunkInput): void {
       !Number.isInteger(input.startPage) || !Number.isInteger(input.endPage) || input.startPage < 1 ||
       input.endPage < input.startPage || input.endPage > input.pageCount ||
       !validSection(input.section, input.pageCount, input.startPage, input.endPage) ||
+      (input.evidenceMode !== undefined && !["pdf", "research"].includes(input.evidenceMode)) ||
       !Array.isArray(input.emptyPages) || input.emptyPages.some((page) => !Number.isInteger(page) || page < input.startPage || page > input.endPage) ||
       (input.kind === "summary" && (input.requestedCount !== 0 || !Number.isInteger(input.wordTarget) ||
         (input.wordTarget || 0) < 20 || (input.wordTarget || 0) > 1000)) ||
-      (input.kind === "quiz" && (!quizCounts.has(input.requestedCount) ||
+      (input.kind === "quiz" && (!validQuizCount(input.requestedCount) ||
         !Array.isArray(input.plannedFormats) || !Array.isArray(input.plannedFamilies) ||
-        input.plannedFormats.length !== input.plannedFamilies.length || input.plannedFormats.length > 30 ||
+        input.plannedFormats.length !== input.plannedFamilies.length || input.plannedFormats.length > 10 ||
         input.plannedFormats.some((type) => !["single_best", "select_all", "select_n"].includes(type)) ||
         input.plannedFamilies.some((family) => !QUESTION_FAMILIES.includes(family as typeof QUESTION_FAMILIES[number]))))) {
     throw new AppError(400, "Invalid whole-PDF processing segment.");
@@ -67,8 +70,9 @@ function validChunk(input: ChunkInput): void {
 }
 
 function mapIdentity(input: ChunkInput, textHash: string): string {
-  return createHash("sha256").update(JSON.stringify({ textHash, rule: STUDY_RULE_VERSION, kind: input.kind,
+  return createHash("sha256").update(JSON.stringify({ operationId: input.operationId, textHash, rule: STUDY_RULE_VERSION, kind: input.kind,
     section: input.section, summaryProfile: input.summaryProfile, wordTarget: input.wordTarget,
+    evidenceMode: input.evidenceMode || "pdf",
     plannedFormats: input.plannedFormats, plannedFamilies: input.plannedFamilies })).digest("hex").slice(0, 20);
 }
 
@@ -90,6 +94,7 @@ export async function processChunk(principal: AiPrincipal, input: ChunkInput, si
         map.chunkIndex !== input.chunkIndex || map.chunkCount !== input.chunkCount ||
         map.startPage !== input.startPage || map.endPage !== input.endPage || map.pageCount !== input.pageCount ||
         map.requestedCount !== input.requestedCount || map.summaryProfile !== input.summaryProfile ||
+        (map.evidenceMode || "pdf") !== (input.evidenceMode || "pdf") ||
         map.wordTarget !== input.wordTarget || JSON.stringify(map.section) !== JSON.stringify(input.section) ||
         JSON.stringify(map.plannedFormats || []) !== JSON.stringify(input.plannedFormats || []) ||
         JSON.stringify(map.plannedFamilies || []) !== JSON.stringify(input.plannedFamilies || []) ||
@@ -103,7 +108,12 @@ export async function processChunk(principal: AiPrincipal, input: ChunkInput, si
     startPage: input.startPage, endPage: input.endPage, pageCount: input.pageCount,
     requestedCount: input.requestedCount, textHash, emptyPages: [...new Set(input.emptyPages)].sort((a, b) => a - b),
     ruleVersion: STUDY_RULE_VERSION, summaryProfile: input.summaryProfile, section: input.section,
-    wordTarget: input.wordTarget, plannedFormats: input.plannedFormats, plannedFamilies: input.plannedFamilies };
+    wordTarget: input.wordTarget, plannedFormats: input.plannedFormats, plannedFamilies: input.plannedFamilies,
+    evidenceMode: input.evidenceMode || "pdf" };
+  const modelsUsed = new Set<string>();
+  const evidence = input.evidenceMode === "research"
+    ? await retrieveEvidence(input.text, classifyStudyDomain(`${input.section.title} ${input.text}`)) : [];
+  if (evidence.length) map.evidenceReferences = evidence.map(({ title, year, url }) => ({ title, year, url }));
   if (map.emptyPages.length === map.endPage - map.startPage + 1) {
     if (input.kind === "summary") map.digest = "No extractable text was available for these pages; visual content was not interpreted.";
     else map.questions = [];
@@ -113,7 +123,8 @@ export async function processChunk(principal: AiPrincipal, input: ChunkInput, si
     else map.questions = [];
   } else if (input.kind === "summary") {
     map.digest = await withAiAdmission(principal, (reserve) => summarizeChunk(input.text, input.startPage,
-      input.endPage, input.summaryProfile!, input.section.title, input.section.source, input.wordTarget!, reserve, signal),
+      input.endPage, input.summaryProfile!, input.section.title, input.section.source, input.wordTarget!, reserve, signal, evidence,
+      (model) => modelsUsed.add(model)),
     { operationId: input.operationId, phase: "summary_segment" });
   } else if (input.plannedFormats!.length) {
     map.questions = await withAiAdmission(principal, async (reserve) => {
@@ -136,11 +147,14 @@ export async function processChunk(principal: AiPrincipal, input: ChunkInput, si
             throw new AppError(502, "Saved assessment batch failed integrity validation.");
           }
           questions.push(...saved.map.questions!);
+          for (const model of saved.map.modelsUsed || []) modelsUsed.add(model);
           continue;
         }
         const generated = await generateChunkQuestions(input.text, formats, families,
-          input.startPage, input.endPage, input.section.title, reserve, signal);
-        const batchMap: MapRecord = { ...map, plannedFormats: formats, plannedFamilies: families, questions: generated };
+          input.startPage, input.endPage, input.section.title, reserve, signal, evidence,
+          (model) => modelsUsed.add(model));
+        const batchMap: MapRecord = { ...map, plannedFormats: formats, plannedFamilies: families, questions: generated,
+          modelsUsed: [...modelsUsed] };
         await saveMap(accessToken, batchName, { map: batchMap, signature: signMap(batchMap) });
         questions.push(...generated);
       }
@@ -148,6 +162,7 @@ export async function processChunk(principal: AiPrincipal, input: ChunkInput, si
     }, { operationId: input.operationId, phase: "quiz_segment" });
   } else map.questions = [];
   if (signal?.aborted) throw new AppError(499, "Processing stopped. Retry to reuse completed work.");
+  if (modelsUsed.size) map.modelsUsed = [...modelsUsed];
   const signed = { map, signature: signMap(map) };
   await saveMap(accessToken, name, signed);
   return signed;
@@ -160,6 +175,7 @@ export type FinalizeInput = {
   sourceMd5: string;
   requestedCount: number;
   summaryProfile?: SummaryProfile;
+  evidenceMode?: EvidenceMode;
   maps: SignedMap[];
 };
 
@@ -169,8 +185,9 @@ export async function finalize(principal: AiPrincipal, input: FinalizeInput) {
       typeof input.documentId !== "string" || typeof input.sourceMd5 !== "string" ||
       !/^[a-f0-9]{32}$/i.test(input.sourceMd5) || !Array.isArray(input.maps) ||
       input.maps.length < 1 || input.maps.length > 80 ||
+      (input.evidenceMode !== undefined && !["pdf", "research"].includes(input.evidenceMode)) ||
       (input.kind === "summary" && input.requestedCount !== 0) ||
-      (input.kind === "quiz" && !quizCounts.has(input.requestedCount))) {
+      (input.kind === "quiz" && !validQuizCount(input.requestedCount))) {
     throw new AppError(400, "Invalid whole-PDF completion request.");
   }
   if (input.kind === "summary") {
@@ -194,6 +211,7 @@ export async function finalize(principal: AiPrincipal, input: FinalizeInput) {
     if (map.schema !== 3 || map.ruleVersion !== STUDY_RULE_VERSION || map.subject !== sub ||
         map.kind !== input.kind || map.documentId !== input.documentId || map.sourceMd5 !== input.sourceMd5 ||
         map.requestedCount !== input.requestedCount || map.summaryProfile !== input.summaryProfile ||
+        (map.evidenceMode || "pdf") !== (input.evidenceMode || "pdf") ||
         map.chunkIndex !== index || map.chunkCount !== maps.length || map.pageCount !== pageCount ||
         (index > 0 && map.startPage !== maps[index - 1].endPage + 1) ||
         !validSection(map.section, pageCount, map.startPage, map.endPage) ||
@@ -214,9 +232,13 @@ export async function finalize(principal: AiPrincipal, input: FinalizeInput) {
       throw new AppError(400, "Document sections do not cover the full PDF.");
     }
   }
+  const usedModels = [...new Set(maps.flatMap((map) => map.modelsUsed || []))];
   const common = { schema: 2 as const, documentId: input.documentId, sourceMd5: input.sourceMd5,
-    model: modelName(), pageCount, readablePages: pageCount - emptyPages.length, emptyPages,
-    chunkCount: maps.length, ruleVersion: STUDY_RULE_VERSION, sections };
+    model: usedModels.join(" + ") || modelName(), modelsUsed: usedModels,
+    pageCount, readablePages: pageCount - emptyPages.length, emptyPages,
+    chunkCount: maps.length, ruleVersion: STUDY_RULE_VERSION, sections,
+    evidenceMode: input.evidenceMode || "pdf",
+    evidenceReferences: [...new Map(maps.flatMap((map) => map.evidenceReferences || []).map((item) => [item.url, item])).values()] };
   if (input.kind === "summary") {
     if (maps.some((map) => !map.digest)) throw new AppError(400, "Section summary is missing.");
     const paragraphs = sections.map((section) => {

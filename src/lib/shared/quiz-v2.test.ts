@@ -34,4 +34,16 @@ describe("multiple-response assessment contract", () => {
     expect(() => validateQuestionsV2([{ ...item("single_best", [0], null), source_excerpt: "invented proof" }], source,
       ["single_best"], ["mechanism"], 1, 1)).toThrow();
   });
+  it("rejects invented clinical drugs and durations in distractors", () => {
+    const dental = "Dental treatment is prioritized for adults with pulpitis. Antibiotics are not an adjunct when definitive dental treatment is available.";
+    const raw = { ...item("single_best", [0], null), question_family: "management",
+      question: "For adults with pulpitis, which action follows the dental source?",
+      options: ["Prioritize definitive dental treatment.", "Give a 7-day course of amoxicillin.",
+        "Delay all dental treatment indefinitely.", "Assume a diagnostic test is unnecessary."],
+      option_explanations: ["The source prioritizes dental treatment.", "The source provides no drug regimen.",
+        "The source does not support delay.", "The source does not address testing."],
+      source_excerpt: "Dental treatment is prioritized" };
+    expect(() => validateQuestionsV2([raw], dental, ["single_best"], ["management"], 1, 1))
+      .toThrow(/invented a clinical drug/);
+  });
 });

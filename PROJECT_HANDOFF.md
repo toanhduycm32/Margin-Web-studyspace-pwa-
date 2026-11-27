@@ -1656,3 +1656,13 @@ Keep the application exceptionally clean.
 ---
 
 END OF PROJECT CONTEXT HANDOFF
+
+## Accepted addendum — medical and dental learning intelligence (2026-11-27)
+
+The latest user handoff makes medicine and dentistry the primary calibration domains while preserving the general PDF reader, private per-user Google Drive data, independent authorized Google sessions, clean iPhone PWA, whole-PDF coverage, and shared server-side NVIDIA integration. This is an educational tool, not a clinical decision tool. No Supabase or additional hosted database is authorized.
+
+Mistral Large 4 (`mistralai/mistral-large-4-1t-a52b`) is the preferred model through the existing NVIDIA key. Its request uses `reasoning_effort: high`, not Nemotron-specific controls. Availability and educational quality must be measured rather than assumed. A bounded Nemotron fallback may protect continuity when Mistral is unavailable, and saved resources must identify actual participating models.
+
+Operational requirements: task-specific source-grounded prompts and calibration rules; meaningful medical/dental theory and conditional clinical reasoning; five distinct summary profiles; original single-best and multiple-response items; source/answer/medical review with bounded repair; adaptive quiz plans with honest coverage and resumable batches; randomized display order per attempt with stable scoring IDs; optional privacy-preserving external research with clear PDF versus external provenance. The source PDF remains the primary authority. External abstracts are limited cross-checks, not complete guidelines. Preserve all finished legacy artifacts and attempts.
+
+Current code and evaluation evidence are documented in `ARCHITECTURE.md`, `AI_QUALITY_DECISIONS.md`, and `STATUS.md`. Remaining limits include text-only extraction, heuristic document/domain planning, fallible model review, provider latency, best-effort cross-instance quotas, and the need for real authenticated two-user and iPhone checks. Do not claim clinical correctness or verified whole-document comprehension from structural tests alone.
