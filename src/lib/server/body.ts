@@ -1,6 +1,6 @@
 import { AppError } from "./errors";
 
-export async function readJsonBody<T>(request: Request, maximumBytes: number): Promise<T> {
+export async function readJsonBody<T>(request: Request | Response, maximumBytes: number): Promise<T> {
   const declared = Number(request.headers.get("content-length"));
   if (declared > maximumBytes) throw new AppError(413, "Request body is too large.");
   if (!request.body) throw new AppError(400, "Request body is missing.");

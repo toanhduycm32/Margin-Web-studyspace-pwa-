@@ -9,7 +9,7 @@ import { documentSections } from "@/lib/client/structure";
 import { correctOptionIds, responseType } from "@/lib/shared/quiz";
 import { newOptionOrders } from "@/lib/shared/attempt-order";
 import { allocateQuizBlueprint, classifyStudyDomain, recommendedQuestionCount, sectionWordTarget, STUDY_RULE_VERSION, SUMMARY_PROFILES, type SummaryProfile } from "@/lib/shared/study-rules";
-import type { ArtifactRecord, AttemptRecord, DocumentRecord, DriveFile, QuizQuestion, SignedMap } from "@/lib/shared/types";
+import type { ArtifactRecord, AttemptRecord, ChunkResult, DocumentRecord, DriveFile, QuizQuestion, SignedMap } from "@/lib/shared/types";
 import PageSurface from "./page-surface";
 import SummaryContent from "./summary-content";
 
@@ -216,14 +216,23 @@ export default function ReaderClient({ id }: { id: string }) {
           plannedFormats: kind === "quiz" ? blueprint[index].formats : undefined,
           plannedFamilies: kind === "quiz" ? blueprint[index].families : undefined });
         let result: SignedMap | null = null;
-        for (let retry = 0; retry < 4; retry++) {
-          try { result = await api<SignedMap>("/api/ai/chunk", { method: "POST", signal: controller.signal, body }); break; }
-          catch (caught) {
-            if (!(caught instanceof ApiError) || caught.status !== 503 || retry === 3 || controller.signal.aborted) throw caught;
-            await new Promise<void>((resolve, reject) => {
-              const timer = setTimeout(resolve, 800 * 2 ** retry);
-              controller.signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("Processing stopped.")); }, { once: true });
-            });
+        for (let step = 0; !result && step < 3; step++) {
+          for (let retry = 0; retry < 4; retry++) {
+            try {
+              const response = await api<ChunkResult>("/api/ai/chunk", { method: "POST", signal: controller.signal, body });
+              if ("pending" in response) {
+                setRunning({ stage: `Building your assessment · ${response.completedQuestions}/${response.totalQuestions} questions in this section saved`,
+                  done: index, total: chunks.length });
+              } else result = response;
+              break;
+            }
+            catch (caught) {
+              if (!(caught instanceof ApiError) || caught.status !== 503 || retry === 3 || controller.signal.aborted) throw caught;
+              await new Promise<void>((resolve, reject) => {
+                const timer = setTimeout(resolve, 800 * 2 ** retry);
+                controller.signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("Processing stopped.")); }, { once: true });
+              });
+            }
           }
         }
         if (!result) throw new Error("Processing segment did not complete.");

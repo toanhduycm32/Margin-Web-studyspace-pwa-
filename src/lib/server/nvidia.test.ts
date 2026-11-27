@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateChunkQuestions, summarizeChunk } from "./nvidia";
+import { AppError } from "./errors";
 
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
@@ -81,6 +82,18 @@ describe("NVIDIA reasoning request", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
     const repair = JSON.parse(String((fetchMock.mock.calls[2][1] as RequestInit).body));
     expect(repair.messages[1].content).toContain("Replace only item 1");
+    expect(repair.messages[1].content).toContain('"correct_option_ids"');
+    expect(repair.messages[1].content).toContain('"option_explanations"');
+  });
+  it("does not retry a user's quota rejection as a provider outage", async () => {
+    vi.stubEnv("NVIDIA_API_KEY", "test-key-only");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const reserve = vi.fn().mockRejectedValue(new AppError(429, "Daily quota reached."));
+    await expect(summarizeChunk("A source passage about a mechanism and its limits.", 1, 1,
+      "academic", "Introduction", "heading", 50, reserve)).rejects.toThrow("Daily quota reached.");
+    expect(reserve).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
   it("uses the legacy model when Mistral times out and reserves both calls", async () => {
     vi.stubEnv("NVIDIA_API_KEY", "test-key-only");

@@ -1,5 +1,6 @@
 import type { LegacyQuizQuestion, MapRecord, QuizQuestion, QuizQuestionV2, ResponseType } from "./types";
 import { QUESTION_FAMILIES, classifyStudyDomain } from "./study-rules";
+import { MAX_QUESTION_BYTES } from "./limits";
 
 const normalized = (text: string) => text.trim().toLocaleLowerCase().replace(/\s+/g, " ");
 
@@ -91,13 +92,17 @@ export function validateQuestionsV2(value: unknown, source: string, formats: Res
     }
     if (seen.has(stem)) throw new Error("Duplicate assessment items were generated.");
     seen.add(stem);
-    return { id: `${startPage}-${endPage}-${index + 1}`, responseType: formats[index],
+    const question: QuizQuestionV2 = { id: `${startPage}-${endPage}-${index + 1}`, responseType: formats[index],
       selectionCount: formats[index] === "select_n" ? keys.length : null,
       questionFamily: families[index], cognitiveDemand: item.cognitive_demand as QuizQuestionV2["cognitiveDemand"],
       difficulty: item.difficulty as QuizQuestionV2["difficulty"], question: item.question.trim(),
       options: options.map((part) => String(part).trim()), correctOptionIds: [...keys].sort((a, b) => a - b),
       explanation: item.explanation.trim(), optionExplanations: explanations.map((part) => String(part).trim()),
       sourceExcerpt: item.source_excerpt, startPage, endPage };
+    if (new TextEncoder().encode(JSON.stringify(question)).byteLength > MAX_QUESTION_BYTES) {
+      throw new Error(`Item ${index + 1} is too verbose. Shorten its explanation and source excerpt while preserving all necessary conditions.`);
+    }
+    return question;
   });
 }
 

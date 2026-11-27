@@ -1,6 +1,6 @@
 import type { ResponseType } from "./types";
 
-export const STUDY_RULE_VERSION = "2026-11-27-medical-1";
+export const STUDY_RULE_VERSION = "2026-11-27-medical-2";
 
 export type StudyDomain = "general" | "medical" | "dental";
 

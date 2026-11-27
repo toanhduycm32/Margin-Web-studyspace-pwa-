@@ -125,3 +125,5 @@ export type DriveFile = {
   modifiedTime?: string;
   capabilities?: { canDownload?: boolean };
 };
+export type ChunkProgress = { pending: true; completedQuestions: number; totalQuestions: number };
+export type ChunkResult = SignedMap | ChunkProgress;

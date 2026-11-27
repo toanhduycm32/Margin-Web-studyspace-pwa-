@@ -1,5 +1,13 @@
 # Build status — 2026-11-27
 
+## 2026-11-27 final-use verification (in progress)
+
+Bound to workflow v4.103 and app revision `490b1b6` at entry. The owner requested a careful final check before use. An existing Chrome session authenticated to production and loaded the owner's private library. Opening the language-learning PDF failed with `Google Drive returned an unexpected PDF byte range`. A new regression reproduced that exact message: PDF.js can coalesce adjacent ranges beyond the API's 2 MiB response cap. The client now splits these requests into 1 MiB HTTP transfers and reassembles the exact range expected by PDF.js. The original range checks and account-scoped server cache remain enforced.
+
+The review also reproduced a 300-item Vietnamese record exceeding the old 1 MB storage cap, quota errors being mistaken for Mistral outages, and the repair prompt omitting its required output schema. The fixes align bounded UTF-8 storage (3.5 MB), finalization (4 MB), and generated question sizes; distinguish provider failures from user admission failures; and supply the complete repair schema. Research references are now accumulated from the batches that actually used them, including recovered checkpoints. Unassessed pages do not retrieve or claim evidence. Each HTTP request generates at most one new five-item batch, returns a continuation when needed, and the UI resumes automatically from signed Drive records. A 240-second inference deadline leaves room before the configured 300-second function limit. Rule version is `2026-11-27-medical-2`; finished older artifacts remain readable.
+
+Local verification: 59 automated tests passed; two opt-in live evaluations were skipped. TypeScript passed as part of the production build. Live post-deployment PDF, generation, persistence and scoring checks are pending below. No claim of physical iPhone, two real concurrent accounts, or clinical expert validation is made.
+
 ## 2026-11-27 medical and dental learning upgrade
 
 The latest medical/dental intelligence handoff was reconciled with the project workflow v4.102 and current standalone Margin app. The implementation now prefers NVIDIA Mistral Large 4 with model-specific `reasoning_effort: high`; the old production `NVIDIA_MODEL` value is interpreted as a legacy setting so it cannot silently prevent migration. A 45-second Mistral deadline and temporary provider failures use Nemotron as a bounded fallback. The saved artifact records the models that actually responded. The existing per-user Drive quota counts every primary and fallback call. Local ignored `.env.local` selects Mistral; no key or Google secret was placed in tracked files.

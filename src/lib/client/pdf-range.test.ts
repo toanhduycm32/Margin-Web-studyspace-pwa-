@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { DrivePdfRangeTransport } from "./pdf-range";
+import { planPdfRange } from "@/lib/shared/range";
 
 function samplePdf(): Uint8Array {
   const content = "BT /F1 12 Tf 40 250 Td (Range-loaded document) Tj ET";
@@ -28,6 +29,28 @@ const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
 describe("PDF.js Drive range transport", () => {
+  it("fulfills a merged PDF.js range larger than the server response limit", async () => {
+    const bytes = new Uint8Array(3 * 1024 * 1024 + 137).fill(43);
+    const requestedSizes: number[] = [];
+    globalThis.fetch = vi.fn(async (_url, options) => {
+      const plan = planPdfRange(new Headers(options?.headers).get("range"), bytes.length);
+      if ("error" in plan) throw new Error(plan.error);
+      const [, begin, end] = /^bytes=(\d+)-(\d+)$/.exec(plan.range)!;
+      requestedSizes.push(Number(end) - Number(begin) + 1);
+      return new Response(bytes.slice(Number(begin), Number(end) + 1), { status: 206,
+        headers: { "Content-Range": `bytes ${begin}-${end}/${bytes.length}` } });
+    }) as typeof fetch;
+    const failures: Error[] = [];
+    const received: Uint8Array[] = [];
+    const transport = new DrivePdfRangeTransport("/pdf", bytes.length, (error) => failures.push(error));
+    transport.addRangeListener((_begin: number, data: Uint8Array) => received.push(data));
+    transport.transportReady();
+    transport.requestDataRange(0, bytes.length);
+    await vi.waitFor(() => expect(received.length + failures.length).toBe(1));
+    expect(failures).toEqual([]);
+    expect(received[0]).toEqual(bytes);
+    expect(Math.max(...requestedSizes)).toBeLessThanOrEqual(1024 * 1024);
+  });
   it("loads and renders a PDF through multiple exact byte ranges", async () => {
     const bytes = samplePdf();
     const ranges: string[] = [];

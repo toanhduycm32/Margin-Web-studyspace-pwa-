@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { DocumentSection, EvidenceMode, MapRecord, ResponseType, SignedMap } from "@/lib/shared/types";
+import type { ChunkResult, DocumentSection, EvidenceMode, MapRecord, ResponseType, SignedMap } from "@/lib/shared/types";
 import { selectCoveredQuestions } from "@/lib/shared/quiz";
 import { QUESTION_FAMILIES, STUDY_RULE_VERSION, classifyStudyDomain, responseTargets, summaryProfile, type SummaryProfile } from "@/lib/shared/study-rules";
 import { retrieveEvidence } from "./evidence";
@@ -76,7 +76,7 @@ function mapIdentity(input: ChunkInput, textHash: string): string {
     plannedFormats: input.plannedFormats, plannedFamilies: input.plannedFamilies })).digest("hex").slice(0, 20);
 }
 
-export async function processChunk(principal: AiPrincipal, input: ChunkInput, signal?: AbortSignal): Promise<SignedMap> {
+export async function processChunk(principal: AiPrincipal, input: ChunkInput, signal?: AbortSignal): Promise<ChunkResult> {
   validChunk(input);
   const { accessToken, sub } = principal;
   await getDocumentRecord(accessToken, input.documentId);
@@ -111,9 +111,10 @@ export async function processChunk(principal: AiPrincipal, input: ChunkInput, si
     wordTarget: input.wordTarget, plannedFormats: input.plannedFormats, plannedFamilies: input.plannedFamilies,
     evidenceMode: input.evidenceMode || "pdf" };
   const modelsUsed = new Set<string>();
-  const evidence = input.evidenceMode === "research"
-    ? await retrieveEvidence(input.text, classifyStudyDomain(`${input.section.title} ${input.text}`)) : [];
-  if (evidence.length) map.evidenceReferences = evidence.map(({ title, year, url }) => ({ title, year, url }));
+  let evidencePromise: ReturnType<typeof retrieveEvidence> | undefined;
+  const evidenceForGeneration = () => evidencePromise ||= input.evidenceMode === "research"
+    ? retrieveEvidence(input.text, classifyStudyDomain(`${input.section.title} ${input.text}`)) : Promise.resolve([]);
+  const references = new Map<string, NonNullable<MapRecord["evidenceReferences"]>[number]>();
   if (map.emptyPages.length === map.endPage - map.startPage + 1) {
     if (input.kind === "summary") map.digest = "No extractable text was available for these pages; visual content was not interpreted.";
     else map.questions = [];
@@ -122,13 +123,16 @@ export async function processChunk(principal: AiPrincipal, input: ChunkInput, si
     else if (input.plannedFormats!.length) throw new AppError(422, "This PDF section has too little text for reliable questions.");
     else map.questions = [];
   } else if (input.kind === "summary") {
+    const evidence = await evidenceForGeneration();
     map.digest = await withAiAdmission(principal, (reserve) => summarizeChunk(input.text, input.startPage,
       input.endPage, input.summaryProfile!, input.section.title, input.section.source, input.wordTarget!, reserve, signal, evidence,
       (model) => modelsUsed.add(model)),
     { operationId: input.operationId, phase: "summary_segment" });
+    for (const { title, year, url } of evidence) references.set(url, { title, year, url });
   } else if (input.plannedFormats!.length) {
-    map.questions = await withAiAdmission(principal, async (reserve) => {
+    const result = await withAiAdmission(principal, async (reserve) => {
       const questions: NonNullable<MapRecord["questions"]> = [];
+      let generatedBatches = 0;
       for (let offset = 0; offset < input.plannedFormats!.length; offset += 5) {
         if (signal?.aborted) throw new AppError(499, "Processing stopped. Retry to reuse completed work.");
         const formats = input.plannedFormats!.slice(offset, offset + 5);
@@ -138,6 +142,7 @@ export async function processChunk(principal: AiPrincipal, input: ChunkInput, si
         if (saved) {
           if (!verifyMap(saved.map, saved.signature) || saved.map.schema !== 3 || saved.map.subject !== sub ||
               saved.map.ruleVersion !== STUDY_RULE_VERSION || saved.map.textHash !== textHash ||
+              saved.map.kind !== "quiz" || (saved.map.evidenceMode || "pdf") !== (input.evidenceMode || "pdf") ||
               saved.map.documentId !== input.documentId || saved.map.sourceMd5 !== input.sourceMd5 ||
               saved.map.startPage !== input.startPage || saved.map.endPage !== input.endPage ||
               JSON.stringify(saved.map.section) !== JSON.stringify(input.section) ||
@@ -148,21 +153,34 @@ export async function processChunk(principal: AiPrincipal, input: ChunkInput, si
           }
           questions.push(...saved.map.questions!);
           for (const model of saved.map.modelsUsed || []) modelsUsed.add(model);
+          for (const reference of saved.map.evidenceReferences || []) references.set(reference.url, reference);
           continue;
         }
+        // A new HTTP request resumes from these signed Drive checkpoints. Never put
+        // two full generation/review/repair workflows in one serverless invocation.
+        if (generatedBatches >= 1) return { pending: true as const,
+          completedQuestions: questions.length, totalQuestions: input.plannedFormats!.length };
+        const evidence = await evidenceForGeneration();
+        const batchModels = new Set<string>();
         const generated = await generateChunkQuestions(input.text, formats, families,
           input.startPage, input.endPage, input.section.title, reserve, signal, evidence,
-          (model) => modelsUsed.add(model));
+          (model) => batchModels.add(model));
         const batchMap: MapRecord = { ...map, plannedFormats: formats, plannedFamilies: families, questions: generated,
-          modelsUsed: [...modelsUsed] };
+          modelsUsed: [...batchModels], evidenceReferences: evidence.map(({ title, year, url }) => ({ title, year, url })) };
         await saveMap(accessToken, batchName, { map: batchMap, signature: signMap(batchMap) });
+        for (const model of batchModels) modelsUsed.add(model);
+        for (const reference of batchMap.evidenceReferences!) references.set(reference.url, reference);
         questions.push(...generated);
+        generatedBatches++;
       }
       return questions.map((question, index) => ({ ...question, id: `${input.startPage}-${input.endPage}-${index + 1}` }));
     }, { operationId: input.operationId, phase: "quiz_segment" });
+    if (!Array.isArray(result)) return result;
+    map.questions = result;
   } else map.questions = [];
   if (signal?.aborted) throw new AppError(499, "Processing stopped. Retry to reuse completed work.");
   if (modelsUsed.size) map.modelsUsed = [...modelsUsed];
+  if (references.size) map.evidenceReferences = [...references.values()];
   const signed = { map, signature: signMap(map) };
   await saveMap(accessToken, name, signed);
   return signed;

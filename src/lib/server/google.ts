@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import type { DriveFile } from "@/lib/shared/types";
 import { googleCredentials } from "./config";
 import { AppError } from "./errors";
+import { readJsonBody } from "./body";
+import { MAX_LEARNING_RECORD_BYTES } from "@/lib/shared/limits";
 
 export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 export const APP_DATA_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
@@ -123,12 +125,11 @@ export async function findAppData(accessToken: string, name: string): Promise<Ap
 export async function readAppData<T>(accessToken: string, id: string): Promise<T> {
   if (!/^[A-Za-z0-9_-]{8,160}$/.test(id)) throw new AppError(400, "Invalid data record ID.");
   const response = await driveFetch(accessToken, `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`);
-  const declared = Number(response.headers.get("content-length"));
-  if (declared > 1_000_000) throw new AppError(413, "Stored learning record is too large.");
-  const text = await response.text();
-  if (text.length > 1_000_000) throw new AppError(413, "Stored learning record is too large.");
-  try { return JSON.parse(text) as T; }
-  catch { throw new AppError(502, "Stored learning record is damaged."); }
+  try { return await readJsonBody<T>(response, MAX_LEARNING_RECORD_BYTES); }
+  catch (error) {
+    if (error instanceof AppError && error.status === 413) throw new AppError(413, "Stored learning record is too large.");
+    throw new AppError(502, "Stored learning record is damaged or could not be fully downloaded. Retry shortly.");
+  }
 }
 
 export async function createAppData(accessToken: string, name: string, value: unknown,
@@ -136,9 +137,10 @@ export async function createAppData(accessToken: string, name: string, value: un
   const metadata = { name, mimeType: "application/json", parents: ["appDataFolder"],
     description: description.slice(0, 200), appProperties: { app: "margin-v1", ...properties } };
   const boundary = `margin_${randomBytes(12).toString("hex")}`;
+  const json = JSON.stringify(value);
+  if (Buffer.byteLength(json) > MAX_LEARNING_RECORD_BYTES) throw new AppError(413, "Learning record is too large.");
   const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
-    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(value)}\r\n--${boundary}--`;
-  if (Buffer.byteLength(body) > 1_000_000) throw new AppError(413, "Learning record is too large.");
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${json}\r\n--${boundary}--`;
   const url = new URL("https://www.googleapis.com/upload/drive/v3/files");
   url.searchParams.set("uploadType", "multipart");
   url.searchParams.set("fields", "id,name,description,modifiedTime,appProperties");
@@ -150,7 +152,7 @@ export async function createAppData(accessToken: string, name: string, value: un
 export async function updateAppData(accessToken: string, id: string, value: unknown): Promise<void> {
   if (!/^[A-Za-z0-9_-]{8,160}$/.test(id)) throw new AppError(400, "Invalid data record ID.");
   const body = JSON.stringify(value);
-  if (Buffer.byteLength(body) > 1_000_000) throw new AppError(413, "Learning record is too large.");
+  if (Buffer.byteLength(body) > MAX_LEARNING_RECORD_BYTES) throw new AppError(413, "Learning record is too large.");
   await driveFetch(accessToken, `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(id)}?uploadType=media`, {
     method: "PATCH", headers: { "Content-Type": "application/json" }, body, signal: AbortSignal.timeout(30_000),
   });

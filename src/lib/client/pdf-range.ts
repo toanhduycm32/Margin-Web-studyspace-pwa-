@@ -16,21 +16,28 @@ export class DrivePdfRangeTransport extends PDFDataRangeTransport {
     this.controllers.add(controller);
     void (async () => {
       try {
-        const response = await fetch(this.url, {
-          headers: { Range: `bytes=${begin}-${end - 1}` },
-          credentials: "same-origin", signal: controller.signal, cache: "no-store",
-        });
-        if (!response.ok) {
-          const detail = await response.json().catch(() => null) as { error?: string } | null;
-          throw new Error(detail?.error || `PDF download failed (${response.status}).`);
+        // PDF.js may merge adjacent missing chunks into a much larger request.
+        // Keep each HTTP response bounded, then deliver its original exact range.
+        const combined = new Uint8Array(end - begin);
+        for (let offset = begin; offset < end; offset += CHUNK_SIZE) {
+          const partEnd = Math.min(end, offset + CHUNK_SIZE);
+          const response = await fetch(this.url, {
+            headers: { Range: `bytes=${offset}-${partEnd - 1}` },
+            credentials: "same-origin", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]), cache: "no-store",
+          });
+          if (!response.ok) {
+            const detail = await response.json().catch(() => null) as { error?: string } | null;
+            throw new Error(detail?.error || `PDF download failed (${response.status}).`);
+          }
+          const range = response.headers.get("content-range");
+          if (response.status !== 206 || range !== `bytes ${offset}-${partEnd - 1}/${this.length}`) {
+            throw new Error("Google Drive returned an unexpected PDF byte range. Reopen the PDF and try again.");
+          }
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          if (bytes.length !== partEnd - offset) throw new Error("The PDF download was incomplete. Reopen the PDF and try again.");
+          combined.set(bytes, offset - begin);
         }
-        const range = response.headers.get("content-range");
-        if (response.status !== 206 || range !== `bytes ${begin}-${end - 1}/${this.length}`) {
-          throw new Error("Google Drive returned an unexpected PDF byte range. Reopen the PDF and try again.");
-        }
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        if (bytes.length !== end - begin) throw new Error("The PDF download was incomplete. Reopen the PDF and try again.");
-        if (!controller.signal.aborted) this.onDataRange(begin, bytes);
+        if (!controller.signal.aborted) this.onDataRange(begin, combined);
       } catch (caught) {
         if (!controller.signal.aborted && !this.failed) {
           this.failed = true;
