@@ -64,8 +64,10 @@ export async function withAiAdmission<T>(principal: Principal,
   try {
     return await operation(() => reserveDailyCall(principal));
   } catch (error) {
-    console.warn("ai_admission", { category: error instanceof AppError ? `app_${error.status}` : "unexpected",
-      account, operationId: context?.operationId, phase: context?.phase, elapsedMs: Date.now() - started });
+    if (!(error instanceof AppError) || error.status !== 202) {
+      console.warn("ai_admission", { category: error instanceof AppError ? `app_${error.status}` : "unexpected",
+        account, operationId: context?.operationId, phase: context?.phase, elapsedMs: Date.now() - started });
+    }
     throw error;
   } finally {
     activeTotal -= 1;

@@ -5,6 +5,7 @@ import { saveArtifact } from "./store";
 import type { MapRecord } from "@/lib/shared/types";
 
 vi.mock("./store", () => ({
+  generationOperation: vi.fn(async () => ({ startedAt: "2026-11-27T01:00:00.000Z" })),
   getDocumentRecord: vi.fn(async () => ({ record: { schema: 1 }, meta: { id: "record12345678" } })),
   checkedPdf: vi.fn(async () => ({ md5Checksum: "a".repeat(32) })),
   saveArtifact: vi.fn(), getMap: vi.fn(), saveMap: vi.fn(),
@@ -29,7 +30,7 @@ describe("tenant-bound whole-PDF processing", () => {
   it("assembles ordered section summaries without a truncating final model call", async () => {
     vi.stubEnv("SESSION_SECRET", Buffer.alloc(32, 4).toString("base64"));
     const { finalize } = await import("./pipeline");
-    const base = { schema: 3 as const, subject: "sub-alice", kind: "summary" as const,
+    const base = { operationId: "12345678-1234-1234-1234-123456789abc", schema: 3 as const, subject: "sub-alice", kind: "summary" as const,
       documentId: "file12345678", sourceMd5: "a".repeat(32), chunkCount: 2, pageCount: 4,
       requestedCount: 0, textHash: "b".repeat(64), emptyPages: [], ruleVersion: STUDY_RULE_VERSION,
       summaryProfile: "academic", wordTarget: 180 };

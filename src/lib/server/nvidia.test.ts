@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateChunkQuestions, summarizeChunk } from "./nvidia";
+import { generateChunkQuestions, summarizeChunk, inferenceControls } from "./nvidia";
 import { AppError } from "./errors";
 
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("NVIDIA reasoning request", () => {
   it("sends every requested item schema and reports exhausted validation as a recoverable error", async () => {
@@ -22,10 +22,11 @@ describe("NVIDIA reasoning request", () => {
     const schemas = JSON.parse(template).questions;
     expect(schemas.map((q: { response_type: string }) => q.response_type)).toEqual(["select_all", "select_n", "single_best"]);
     expect(schemas.map((q: { selection_count: number | null }) => q.selection_count)).toEqual([null, 2, null]);
-    expect(schemas.every((q: { source_excerpt?: string }) => typeof q.source_excerpt === "string")).toBe(true);
+    expect(schemas.every((q: { evidence_id?: string }) => q.evidence_id === "E1")).toBe(true);
   });
-  it("sends the source through a server-only reasoning-enabled request", async () => {
+  it("sends source synthesis with the released model's supported low reasoning level", async () => {
     vi.stubEnv("NVIDIA_API_KEY", "test-key-only");
+    vi.stubEnv("NVIDIA_MODEL", "minimaxai/minimax-m3.1-flash");
     const digest = "This section defines the topic, describes its mechanism, relates it to the broader course, and notes its limits in enough detail for study.";
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ digest }) } }],
@@ -37,9 +38,19 @@ describe("NVIDIA reasoning request", () => {
     expect(url).toBe("https://integrate.api.nvidia.com/v1/chat/completions");
     const body = JSON.parse(String(options.body));
     expect(body.model).toBe("mistralai/mistral-large-4-1t-a52b");
-    expect(body.reasoning_effort).toBe("high");
+    expect(body.reasoning_effort).toBe("low");
+    expect(body.max_tokens).toBe(3000);
     expect(body.chat_template_kwargs).toBeUndefined();
     expect(body.stream).toBe(false);
+    expect(body.response_format).toMatchObject({ type: "json_schema", json_schema: {
+      strict: true, schema: { required: ["digest"], additionalProperties: false },
+    } });
+  });
+  it("uses model-specific controls without the rejected Mistral preview none level", () => {
+    const model = "mistralai/mistral-large-4-1t-a52b";
+    expect(inferenceControls(model, 0)).toEqual({ reasoning_effort: "low" });
+    expect(inferenceControls(model, 4096)).toEqual({ reasoning_effort: "medium" });
+    expect(inferenceControls(model, 8192)).toEqual({ reasoning_effort: "high" });
   });
   it("reserves a call again before retrying malformed model output", async () => {
     vi.stubEnv("NVIDIA_API_KEY", "test-key-only");
@@ -114,19 +125,23 @@ describe("NVIDIA reasoning request", () => {
     expect(reserve).toHaveBeenCalledTimes(1);
     expect(fetchMock).not.toHaveBeenCalled();
   });
-  it("uses the legacy model when Mistral times out and reserves both calls", async () => {
+  it("never silently falls back to an unqualified model after provider failure", async () => {
     vi.stubEnv("NVIDIA_API_KEY", "test-key-only");
-    const digest = "This section defines the topic, describes its mechanism, relates it to the broader course, and notes its limits in enough detail for study.";
-    const fetchMock = vi.fn().mockRejectedValueOnce(new DOMException("timeout", "TimeoutError"))
-      .mockResolvedValueOnce(Response.json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ digest }) } }] }));
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("NVIDIA_FALLBACK_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b");
+    const request = vi.fn().mockRejectedValueOnce(new DOMException("timeout", "TimeoutError"));
+    vi.stubGlobal("fetch", request);
     const reserve = vi.fn(async () => {});
-    const models: string[] = [];
-    expect(await summarizeChunk("A source passage about a mechanism and its limits.", 1, 1,
-      "academic", "Introduction", "heading", 50, reserve, undefined, [], (model) => models.push(model))).toBe(digest);
-    expect(reserve).toHaveBeenCalledTimes(2);
-    expect(models).toEqual(["nvidia/nemotron-3.5-lightning-30b-a3b"]);
-    const fallback = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body));
-    expect(fallback.chat_template_kwargs.enable_thinking).toBe(true);
+    await expect(summarizeChunk("Source content.", 1, 1, "academic", "Section", "heading", 40, reserve))
+      .rejects.toMatchObject({ status: 504 });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(reserve).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(request.mock.calls[0][1].body)).model).toBe("mistralai/mistral-large-4-1t-a52b");
+  });
+  it("uses the candidate GLM model's actual effort vocabulary", () => {
+    expect(inferenceControls("z-ai/glm-5.3-flash", 0)).toEqual({ reasoning_effort: "low" });
+    expect(inferenceControls("z-ai/glm-5.3-flash", 2048)).toEqual({ reasoning_effort: "high" });
+    expect(inferenceControls("minimaxai/minimax-m3.1-flash", 2048)).toEqual({
+      reasoning_effort: "low", temperature: 1, top_p: 0.95,
+    });
   });
 });

@@ -30,6 +30,7 @@ export async function openPdfPicker(accessToken: string, onPicked: (ids: string[
   if (!picker) throw new Error("Google Picker is unavailable.");
   const docs = new picker.DocsView().setMimeTypes("application/pdf").setIncludeFolders(false);
   new picker.PickerBuilder()
+    .setLocale("vi")
     .addView(docs)
     .addView(new picker.DocsUploadView())
     .setOAuthToken(accessToken)

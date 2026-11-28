@@ -5,13 +5,29 @@ import { MAX_QUESTION_BYTES } from "./limits";
 const normalized = (text: string) => text.trim().toLocaleLowerCase().replace(/\s+/g, " ");
 export class AssessmentValidationError extends Error {}
 
-function originalSourceExcerpt(source: string, excerpt: unknown): string | null {
+export function originalSourceExcerpt(source: string, excerpt: unknown): string | null {
   if (typeof excerpt !== "string" || excerpt.trim().length < 8 || excerpt.length > 20_000) return null;
   if (source.includes(excerpt)) return excerpt;
   // PDF visual line wraps are layout, not changes to the quoted words. Match only
   // whitespace differences, then retain the actual source span for provenance.
   const pattern = excerpt.trim().split(/\s+/u).map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
-  return source.match(new RegExp(pattern, "u"))?.[0] || null;
+  const wrapped = source.match(new RegExp(pattern, "u"))?.[0];
+  if (wrapped) return wrapped;
+  // Embedded fonts can create whitespace inside Vietnamese syllables. Permit only
+  // whitespace differences, retaining the actual source span; never repair letters,
+  // accents, numbers, punctuation or word order to manufacture a citation.
+  const compact = excerpt.replace(/\s/gu, "");
+  if (compact.length < 15) return null;
+  const index = source.replace(/\s/gu, "").indexOf(compact);
+  if (index < 0) return null;
+  let position = 0, start = -1;
+  for (let cursor = 0; cursor < source.length; cursor++) {
+    if (/\s/u.test(source[cursor])) continue;
+    if (position === index) start = cursor;
+    if (position === index + compact.length - 1) return source.slice(start, cursor + 1);
+    position++;
+  }
+  return null;
 }
 
 export function correctOptionIds(question: QuizQuestion): number[] {
@@ -91,6 +107,13 @@ export function validateQuestionsV2(value: unknown, source: string, formats: Res
       throw new AssessmentValidationError("Assessment item has invalid evidence, answers, explanations or response format.");
     }
     const stem = normalized(item.question);
+    if (options.some((option) => /\b[A-F]\s*(?:và|and|hoặc|or|&)\s*[A-F]\b/i.test(option) ||
+        /(?:tất cả|không có).*(?:đáp án|lựa chọn).*(?:trên|đúng)|(?:all|none) of the above/i.test(option))) {
+      throw new AssessmentValidationError("Write independent options without letter-linked or all/none-of-the-above shortcuts; display order is randomized.");
+    }
+    if (/(?:câu|tình huống|ca bệnh) (?:hỏi )?(?:trước|ở trên)|previous question/i.test(item.question)) {
+      throw new AssessmentValidationError("Make the item self-contained; do not depend on a previous item or its display order.");
+    }
     if (classifyStudyDomain(source) !== "general") {
       const sourceTerms = normalized(source);
       const optionText = options.join(" ").toLowerCase();

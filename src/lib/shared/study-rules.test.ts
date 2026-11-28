@@ -26,8 +26,8 @@ describe("study blueprint and summary profiles", () => {
   });
   it("scales section length by actual source density and profile", () => {
     expect(sectionWordTarget("academic", 12_000)).toBeGreaterThan(sectionWordTarget("academic", 1000));
-    expect(sectionWordTarget("deep", 8000)).toBeGreaterThan(sectionWordTarget("concise", 8000));
-    expect(Object.keys(SUMMARY_PROFILES)).toEqual(["concise", "academic", "deep", "revision", "clinical"]);
+    expect(sectionWordTarget("medical", 100_000)).toBeGreaterThan(sectionWordTarget("medical", 8000));
+    expect(Object.keys(SUMMARY_PROFILES)).toEqual(["medical"]);
   });
   it("recognizes Vietnamese clinical terms with accented word endings", () => {
     expect(classifyStudyDomain("Điều trị, dược lý, bệnh nhân và chẩn đoán.")).toBe("medical");

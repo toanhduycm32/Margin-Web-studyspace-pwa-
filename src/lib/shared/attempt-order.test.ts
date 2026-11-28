@@ -12,4 +12,9 @@ describe("attempt option order", () => {
     expect(newOptionOrders([question], [order])[0]).not.toEqual(order);
     expect(scoreQuiz([question], [[order[order.indexOf(2)]]])).toBe(1);
   });
+  it("preserves legacy letter-linked options instead of changing their meaning", () => {
+    const question: LegacyQuizQuestion = { question: "Các lựa chọn nào đúng?", options: ["Ý thứ nhất", "Ý thứ hai", "A và B", "Không đúng"],
+      answer: 2, explanation: "Liên kết với nhãn gốc.", sourceExcerpt: "source", startPage: 1, endPage: 1 };
+    expect(newOptionOrders([question], [[0, 1, 2, 3]])[0]).toEqual([0, 1, 2, 3]);
+  });
 });

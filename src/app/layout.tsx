@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Margin",
-  description: "Read the whole document. Learn what matters.",
+  description: "Đọc tài liệu, hiểu kiến thức, luyện trắc nghiệm bằng tiếng Việt.",
   applicationName: "Margin",
   appleWebApp: { capable: true, title: "Margin", statusBarStyle: "default" },
   icons: { icon: "/icon.svg", apple: "/apple-touch-icon.png" },
@@ -14,5 +14,5 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body>{children}</body></html>;
+  return <html lang="vi"><body>{children}</body></html>;
 }

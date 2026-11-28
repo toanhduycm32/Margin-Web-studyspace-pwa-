@@ -1,0 +1,1590 @@
+﻿MARGIN — BÁO CÁO CHI TIẾT VỀ CHẤT LƯỢNG AI, TỐC ĐỘ VÀ TRẠNG THÁI NÂNG CẤP
+Thời điểm đối chiếu cuối: 22:06 ngày 27/11/2026, giờ Việt Nam (UTC+7).
+Phạm vi: mã nguồn hiện tại, hồ sơ kiểm thử đã lưu và trạng thái GitHub đã đọc.
+Người nhận: chủ dự án Margin.
+Mục đích: giải thích cụ thể các vấn đề đã báo, cung cấp bằng chứng và xác định
+những điều kiện còn thiếu trước khi phát hành bản nâng cấp.
+
+ĐÂY LÀ BÁO CÁO HIỆN TRẠNG. VIỆC TẠO FILE NÀY KHÔNG PHẢI MỘT LẦN SỬA AI,
+KHÔNG PHẢI MỘT LẦN KIỂM THỬ GIÁO TRÌNH MỚI VÀ KHÔNG PHÁT HÀNH PRODUCTION.
+
+===============================================================================
+MỤC LỤC
+===============================================================================
+
+01. Kết luận dễ hiểu và quyết định hiện tại
+02. Chính xác phiên bản nào đang được nói đến?
+03. Yêu cầu nâng cấp và mức hoàn thành thực tế
+04. Tài liệu thật được dùng để kiểm thử
+05. Quy trình từ PDF đến học liệu và vị trí các lỗi
+06. AI quá chậm: số liệu, ý nghĩa và điều chưa biết
+07. Vì sao 150 giây, 240 giây và 300 giây là ba giới hạn khác nhau?
+08. Mistral và Nemotron: mô hình nào gặp lỗi nào?
+09. Lỗi cấu trúc câu hỏi: giải thích bằng đầu ra đã quan sát
+10. Lỗi tiếng Việt và lỗi tóm tắt: ví dụ cụ thể
+11. PDF đọc được nhưng chữ trích xuất vẫn có thể có vấn đề
+12. Dòng thời gian của các lần thử quan trọng
+13. Ma trận nguyên nhân: đã chứng minh, giả thuyết, chưa đo
+14. Những thay đổi đã thực hiện và giới hạn của từng thay đổi
+15. Cơ chế lưu từng bước: làm được gì, chưa làm được gì?
+16. 95 kiểm tra tự động đạt nghĩa là gì?
+17. Hạn mức AI và phép tính cho kế hoạch 264 mục tiêu
+18. Bảo mật, Google Drive, thay học liệu và nhiều tài khoản
+19. Nguồn tham khảo y khoa và giới hạn của việc đối chiếu
+20. Trạng thái nghiệm thu theo từng khả năng của sản phẩm
+21. Trình tự khắc phục được đề xuất
+22. Điều kiện để được phát hành và cách đo chất lượng
+23. Giải đáp những câu dễ hiểu nhầm
+24. Hồ sơ bằng chứng và vị trí mã nguồn cho người tiếp nhận
+25. Trách nhiệm kỹ thuật và phần bàn giao còn mở
+26. Bảng thuật ngữ và cách đọc các con số
+
+===============================================================================
+01. KẾT LUẬN DỄ HIỂU VÀ QUYẾT ĐỊNH HIỆN TẠI
+===============================================================================
+
+1.1. Kết luận chính
+
+Phần mã của bản nâng cấp tiếng Việt đã được triển khai và đưa lên một nhánh
+GitHub riêng. Tuy nhiên, các lần chạy AI thật trên giáo trình tiếng Việt chưa
+tạo được một bản tóm tắt toàn sách và một ngân hàng câu hỏi đạt chuẩn mới.
+
+Vì vậy, kết luận đúng là:
+
+  - Đã có bản triển khai để kiểm tra và sửa tiếp.
+  - Nhiều hành vi phần mềm đã qua kiểm thử tự động.
+  - Đã thử tài liệu thật và dịch vụ AI thật; các lỗi quan trọng đã xuất hiện.
+  - Chưa đủ bằng chứng để nói bản nâng cấp sẵn sàng cho sử dụng chính thức.
+  - Chưa gộp nhánh nâng cấp vào main để thay bản web chính.
+
+Không nên diễn giải việc có mã, có bản dựng thành công hoặc có trạng thái
+Vercel success thành việc chất lượng học liệu AI đã được nghiệm thu.
+
+1.2. Chuỗi thất bại thực tế
+
+Trong các lượt thử được mô tả ở đây:
+
+  Yêu cầu học liệu từ một phần giáo trình
+    -> Mistral Large 4 chưa trả xong trong thời gian cho phép
+    -> Hệ thống chuyển sang Nemotron dự phòng
+    -> Nemotron trả nội dung hoặc cấu trúc chưa đạt
+    -> Hệ thống thử sửa trong giới hạn
+    -> Kết quả vẫn không đạt hoặc bị cắt giữa chừng
+    -> Không công nhận đó là học liệu hoàn chỉnh.
+
+Ba vấn đề có liên quan nhưng cần phân biệt:
+
+  A. Tốc độ: chờ quá lâu mà chưa có câu trả lời hoàn tất.
+  B. Cấu trúc: câu trả lời không được tổ chức đúng để ứng dụng sử dụng.
+  C. Nội dung: tiếng Việt, thuật ngữ, mức cô đọng hoặc quan hệ kiến thức có lỗi.
+
+Sửa A không tự động sửa B hoặc C. Một mô hình trả rất nhanh vẫn có thể cho
+kết quả sai; một đoạn có cấu trúc hợp lệ vẫn có thể sai kiến thức.
+
+1.3. Điều người dùng cần biết ngay
+
+Các kết quả kém chất lượng được nêu trong báo cáo là kết quả thử của bản nâng
+cấp. Chúng không chứng minh mọi tài liệu, mọi mô hình hoặc mọi câu trả lời của
+Margin đều sai. Ngược lại, cũng không có cơ sở để bỏ qua các lỗi này chỉ vì
+một số bài thử nhỏ ở phiên bản trước đã chạy thành công.
+
+Những lỗi tiếng Việt và cấu trúc cụ thể trong các mẫu mới được ghi nhận ở
+Nemotron dự phòng. Mistral chưa hoàn thành được bài thử giáo dục đủ lớn để
+khẳng định chất lượng đầu ra dài của nó trong quy trình này.
+
+===============================================================================
+02. CHÍNH XÁC PHIÊN BẢN NÀO ĐANG ĐƯỢC NÓI ĐẾN?
+===============================================================================
+
+Repository:
+https://github.com/toanhduycm32/Margin-Web-studyspace-pwa-
+
+Bản nâng cấp trên nhánh:
+codex/vietnamese-learning-upgrade
+
+Commit mã nguồn được đối chiếu:
+55bb3c398c3db05fc8f3e2b64bca86c6f6398b1c
+
+Tên commit:
+Add Vietnamese learning workflow and resumable generation checkpoints
+
+Pull request bản nháp:
+https://github.com/toanhduycm32/Margin-Web-studyspace-pwa-/pull/1
+
+Mã phiên bản quy tắc học tập hiện tại của nhánh:
+2026-11-27-vietnamese-3
+
+Nhánh main được kiểm tra lại khi lập báo cáo vẫn ở:
+036bf409d6ee9c9ca029e6b3395e7feaefe6c403
+
+Địa chỉ web chính đã có của dự án:
+https://margin-web-studyspace-pwa.vercel.app/
+
+GitHub báo trạng thái Vercel success cho commit 55bb3c3. Đây là trạng thái
+của lần triển khai liên quan đến commit trên nhánh. Báo cáo không dùng trạng
+thái đó làm bằng chứng rằng nội dung y khoa đã đúng hoặc bản web chính đã
+chuyển sang nhánh nâng cấp.
+
+Khi tạo pull request, trạng thái là draft, open và chưa merge. Nhánh main và
+nhánh nâng cấp được xác nhận vẫn trỏ đến hai commit khác nhau khi lập báo cáo.
+Không có thao tác merge hoặc phát hành bản nâng cấp lên production trong
+công việc viết báo cáo này.
+
+Các số liệu của những lần thử cũ hơn được ghi rõ là bằng chứng lịch sử.
+Không mặc nhiên coi đầu ra được chấp nhận bởi bộ quy tắc cũ là đạt quy tắc mới.
+
+===============================================================================
+03. YÊU CẦU NÂNG CẤP VÀ MỨC HOÀN THÀNH THỰC TẾ
+===============================================================================
+
+3.1. Trải nghiệm được yêu cầu
+
+Người dùng mở PDF, đọc liên tục, chọn tóm tắt hoặc tạo trắc nghiệm, rồi học.
+Giao diện cần đơn giản, chủ yếu bằng tiếng Việt, thích hợp cho sinh viên Y
+khoa và Răng Hàm Mặt. Không buộc người dùng chọn hàng loạt chế độ hay tự
+quyết định số câu trước mỗi lần tạo.
+
+Những điều kiện phải giữ:
+  - PDF được đọc liên tục trong ứng dụng.
+  - Dữ liệu bền vững ở Google Drive của từng tài khoản.
+  - Các tài khoản được cho phép có phiên và thư viện độc lập.
+  - Xử lý toàn bộ PDF, không chỉ phần đầu.
+  - Dùng NVIDIA thật; Mistral Large 4 là hướng mô hình chính.
+  - Không thêm Supabase, cơ sở dữ liệu thuê ngoài hoặc hạ tầng trả phí mới.
+  - Có kiểm tra nguồn, đáp án, điều kiện y khoa và cách chấm nhiều lựa chọn.
+
+3.2. Các phần đã có trong mã
+
+  - Hai hành động chính: tóm tắt và tạo trắc nghiệm bằng tiếng Việt.
+  - Lập mục tiêu học tập theo từng phần trước khi tạo ngân hàng câu hỏi.
+  - Phân bổ dạng câu và số câu từ các mục tiêu, thay cho bộ đếm nhỏ cố định.
+  - Quy tắc viết phù hợp với loại kiến thức: giải phẫu, cơ chế, bệnh học,
+    lâm sàng, điều trị, vật liệu nha khoa, dự phòng.
+  - Kiểm tra bản tóm tắt và kiểm tra đáp án từng lựa chọn.
+  - Lưu từng phản hồi mô hình để tiếp tục kiểm tra/sửa ở yêu cầu sau.
+  - Một bản tóm tắt hiện hành và một bộ câu hỏi hiện hành cho mỗi PDF.
+  - Chỉ thay học liệu cũ sau khi ứng viên mới được chấp nhận và lưu.
+  - Trộn vị trí lựa chọn ở ranh giới lần làm bài; giữ cách chấm theo định danh
+    ổn định của lựa chọn.
+  - Hiển thị giải thích lựa chọn đúng, lựa chọn bỏ sót và lựa chọn chọn sai.
+
+3.3. Các phần chưa được chứng minh trọn vẹn
+
+Chưa có lần nghiệm thu mới hoàn tất toàn chuỗi:
+
+  Giáo trình tiếng Việt thật -> tóm tắt toàn sách đạt chất lượng -> ngân hàng
+  câu hỏi đầy đủ đạt chất lượng -> lưu Drive -> mở lại -> làm bài -> thay bản
+  cũ bằng bản mới -> kiểm tra hành vi khi lỗi.
+
+Chưa quan sát đủ hai tài khoản Google thật hoạt động đồng thời trên phiên
+độc lập của bản nâng cấp. Chưa có thử nghiệm vật lý đầy đủ trên iPhone và
+chưa có chuyên gia y khoa/giáo dục nghiệm thu nội dung.
+
+Đây là khoảng cách giữa "đã lập trình" và "đã được chứng minh dùng tốt".
+
+===============================================================================
+04. TÀI LIỆU THẬT ĐƯỢC DÙNG ĐỂ KIỂM THỬ
+===============================================================================
+
+4.1. Tài liệu đại diện
+
+Tên: Răng Hàm Mặt — sách dùng cho sinh viên đa khoa.
+Đơn vị: Trường Đại học Y Hà Nội.
+Thông tin ấn bản đã dùng: Nhà xuất bản Giáo dục, 2022.
+Tệp PDF: 222 trang.
+
+Nguồn PDF đã dùng:
+https://storage-vnportal.vnpt.vn/sla-ubnd/5550/tailieuthamkhao/Nhung/R%C4%83ng%20h%C3%A0m%20m%E1%BA%B7t.pdf
+
+Tài liệu được dùng để đánh giá riêng. Chưa xác lập giấy phép cho phép phân
+phối lại toàn bộ sách; PDF không được đưa vào commit mã nguồn.
+
+4.2. Kết quả trích xuất và phân chia
+
+  - Đã đi qua và trích xuất dữ liệu chữ từ đủ 222 trang.
+  - Nhận diện 11 bài học chính và một phần đầu sách.
+  - Các bài bắt đầu ở trang PDF:
+    9, 27, 34, 85, 131, 141, 159, 169, 183, 202, 210.
+  - Tập dữ liệu xử lý có 23 phần vận chuyển nội dung.
+  - Tổng chiều dài các phần trong hồ sơ đã lưu: 304.608 ký tự.
+
+"Trang PDF" ở đây là vị trí trang trong tệp. Nó có thể khác số trang in ở
+chân trang của sách. "23 phần" cũng không có nghĩa sách có 23 bài học.
+
+4.3. Kết quả lập kế hoạch câu hỏi
+
+Đã tạo và lưu được 23 kết quả lập kế hoạch, trong đó phần đầu sách có 0 mục
+tiêu và 22 phần có nội dung học tập. Tổng cộng có 264 mục tiêu.
+
+Số mục tiêu theo thứ tự 23 phần:
+0, 11, 6, 14, 15, 31, 14, 10, 13, 14, 13, 11,
+14, 12, 8, 15, 6, 8, 12, 13, 3, 9, 12.
+
+264 là số mục tiêu trong kế hoạch đã lưu. Không có nghĩa đã tạo được 264 câu
+hỏi hoàn chỉnh, cũng không có nghĩa đã chứng minh mọi ý quan trọng của sách
+đều được kiểm tra.
+
+Đọc lại hồ sơ cho thấy 20 trong 23 kết quả kế hoạch có ít nhất một ghi chú
+giới hạn. Một số ghi chú nói còn chi tiết chưa được tách thành mục tiêu;
+một số chỉ mô tả điều nằm ngoài nguồn hoặc ngoài phạm vi. Các ghi chú do AI
+viết vẫn cần được rà soát, không thể tự động coi tất cả là mô tả chính xác.
+
+4.4. Bằng chứng giao diện
+
+Tệp giáo trình đã được thêm qua Google Picker trong một phiên chủ tài khoản
+đăng nhập ở ứng dụng local. Đã quan sát PDF hiển thị và cuộn liên tục ở các
+trang được kiểm tra, có hai hành động tiếng Việt, và có thể đóng bảng học tập
+để tiếp tục đọc trong khi quá trình tạo đang chạy.
+
+Điều này chứng minh một phần luồng nhập và đọc PDF. Nó chưa chứng minh chất
+lượng học liệu AI hoặc tốc độ toàn ứng dụng trên mọi trang, mọi thiết bị.
+
+===============================================================================
+05. QUY TRÌNH TỪ PDF ĐẾN HỌC LIỆU VÀ VỊ TRÍ CÁC LỖI
+===============================================================================
+
+Luồng tạo tóm tắt:
+
+  1. Mở PDF của tài khoản đang đăng nhập.
+  2. Lấy chữ từng trang, nhận diện các bài và đề mục.
+  3. Chia nội dung thành phần xử lý, phân bổ độ dài tóm tắt.
+  4. Gửi một phần đến mô hình để viết bản nháp.
+  5. Kiểm tra cấu trúc, ngôn ngữ và độ dài.
+  6. Yêu cầu mô hình kiểm tra quan hệ, điều kiện và căn cứ nguồn.
+  7. Sửa có giới hạn nếu chưa đạt.
+  8. Ghép các phần đã đạt theo thứ tự, kiểm tra toàn bộ bộ kết quả.
+  9. Lưu và xác định bản hiện hành trên Drive.
+
+Luồng tạo câu hỏi:
+
+  1. Đọc và phân chia tài liệu.
+  2. Lập mục tiêu cho các phần của toàn tài liệu.
+  3. Phân bổ dạng câu và số câu từ toàn bộ mục tiêu.
+  4. Tạo một nhóm nhỏ câu hỏi theo mục tiêu đã giao.
+  5. Kiểm tra từng trường dữ liệu, lựa chọn, đáp án và căn cứ nguồn.
+  6. Kiểm tra chất lượng nội dung và khả năng đúng/sai của từng lựa chọn.
+  7. Sửa và kiểm tra lại trong giới hạn.
+  8. Lưu nhóm đã đạt; tiếp tục nhóm sau.
+  9. Chỉ chấp nhận cả bộ khi đủ các phần và mục tiêu bắt buộc.
+
+Vị trí lỗi quan sát được:
+
+  - Trích xuất: còn một số khoảng trắng bất thường trong tiếng Việt.
+  - Gọi mô hình: mô hình chính chưa trả xong trước hạn.
+  - Viết nháp: mô hình dự phòng trả quá dài hoặc sai dạng dữ liệu.
+  - Nội dung: xuất hiện từ/cụm từ sai và diễn đạt có thể làm lệch nghĩa.
+  - Sửa: có phản hồi vẫn sai, hoặc bị cắt trước khi hoàn thành.
+  - Kiểm tra AI: từng có bản không tốt được một lượt kiểm tra AI chấp nhận.
+
+Chưa có bằng chứng rằng lỗi chính trong các mẫu này do thao tác chọn PDF,
+Google OAuth hoặc việc người dùng nhập thiếu API key.
+
+===============================================================================
+06. AI QUÁ CHẬM: SỐ LIỆU, Ý NGHĨA VÀ ĐIỀU CHƯA BIẾT
+===============================================================================
+
+6.1. Những phép đo quan trọng
+
+A. Một câu trả lời tiếng Việt ngắn, mức suy luận low:
+   - Mistral trả HTTP 200 và có câu trả lời hoàn tất.
+   - Thời gian đã ghi nhận: 20,784 giây.
+   - Đây là bài thử truy cập và phản hồi ngắn, không phải bản tóm tắt sách.
+
+B. Phép đo nhận dần dữ liệu trên một đoạn chương thật:
+   - Kết nối/nhận phản hồi HTTP ban đầu: khoảng 0,731 giây theo nhật ký đo.
+   - Nhận phần dữ liệu suy luận đầu tiên: 1,292 giây.
+   - Nhận phần nội dung trả lời đầu tiên: 136,063 giây.
+   - Dừng phép đo ở khoảng 170,010 giây: chưa có câu trả lời hoàn tất.
+   - Hồ sơ lưu được 3.557 ký tự phần suy luận; báo cáo không sao chép nội dung
+     suy luận đó và không dùng nó làm học liệu.
+
+C. Một nhóm trang tiếng Việt dài 6.492 ký tự:
+   - Mistral chưa trả xong trong khoảng 150 giây.
+   - Đây là chiều dài phần nguồn, chưa cộng hướng dẫn và mẫu cấu trúc gửi
+     kèm; không phải tổng số token của yêu cầu.
+   - Phần này chỉ là một phần của giáo trình, không phải cả 222 trang.
+
+D. Nhóm hai câu hỏi:
+   - Mistral cũng vượt hạn khoảng 150 giây.
+   - Toàn bài thử, gồm chuyển mô hình và thử sửa, thất bại sau 205,966 giây.
+
+6.2. "Chậm" ở đây gây ảnh hưởng gì?
+
+Người dùng có thể chờ vài phút cho một phần nhỏ nhưng vẫn chưa nhận được
+kết quả dùng được. Nếu một ngân hàng cần nhiều nhóm câu, tổng thời gian còn
+bao gồm lập kế hoạch, tạo nháp, kiểm tra, sửa, lưu Drive và các lần thử lại.
+
+Do chưa có lượt toàn sách thành công với chuẩn mới, hiện chưa có thời gian
+hoàn thành toàn sách đáng tin cậy để báo cho người dùng.
+
+Không được lấy 20,784 giây của câu trả lời ngắn nhân/chia một cách tùy ý để
+hứa thời gian cho giáo trình. Cũng không được lấy một lần hết hạn làm tốc độ
+trung bình của toàn dịch vụ NVIDIA.
+
+6.3. Những kết luận có cơ sở
+
+  - Dịch vụ đã nhận được các yêu cầu; có bài thử ngắn trả kết quả thành công.
+  - Có độ trễ lớn trước khi xuất hiện nội dung trả lời trong phép đo chương.
+  - Giới hạn 150 giây của ứng dụng đã thực sự bị chạm ở các bài giáo dục.
+  - Chia phần nhỏ hơn như đã thử chưa đủ để giải quyết vấn đề.
+
+6.4. Những kết luận chưa có cơ sở
+
+Chưa đủ dữ liệu để xác nhận riêng rẽ:
+  - GPU hoặc máy chủ NVIDIA thiếu tài nguyên ở thời điểm đó.
+  - Hàng đợi của dịch vụ là nguyên nhân chính.
+  - Tốc độ sinh token của mô hình là nguyên nhân duy nhất.
+  - Mạng của người dùng là nguyên nhân.
+  - Chỉ cần trả phí hoặc đổi tài khoản là sẽ hết chậm.
+  - Mọi lần gọi Mistral trong tương lai đều sẽ mất trên 150 giây.
+
+Kết nối ban đầu nhanh giúp khoanh vùng, nhưng không phải phép đo đầy đủ mọi
+thành phần mạng, thời gian chờ và thời gian xử lý nội bộ của nhà cung cấp.
+
+6.5. Điểm yếu trong cách tích hợp của ứng dụng
+
+Quy trình cũ có thể ghép việc viết, kiểm tra và sửa trong cùng một yêu cầu
+máy chủ. Khi một bước đã mất rất lâu, các bước sau ít thời gian để hoàn tất.
+Đây là vấn đề của thiết kế tích hợp cần sửa, không thể chỉ quy hết cho model.
+
+Việc tách các bước và lưu tiến trình đã giảm nguy cơ mất toàn bộ công việc
+trong một lượt. Nhưng nó không làm bản thân mô hình suy luận hay sinh chữ
+nhanh hơn. Tốc độ và chất lượng vẫn cần được đo lại bằng đầu ra đạt chuẩn.
+
+===============================================================================
+07. VÌ SAO 150 GIÂY, 240 GIÂY VÀ 300 GIÂY LÀ BA GIỚI HẠN KHÁC NHAU?
+===============================================================================
+
+Theo mã nguồn của nhánh đang đánh giá:
+
+  150 giây: thời gian chờ tối đa của một lần thử Mistral chính.
+   70 giây: thời gian chờ tối đa của lần gọi mô hình dự phòng.
+  240 giây: hạn nội bộ cho xử lý suy luận trong yêu cầu API của ứng dụng.
+  300 giây: maxDuration được khai báo cho route máy chủ.
+
+300 giây là cấu hình trong mã, không phải lời khẳng định rằng đã xác minh
+toàn bộ giới hạn của gói dịch vụ Vercel hiện tại.
+
+Ứng dụng phải dành thời gian cho việc đọc/lưu Drive, trả phản hồi lỗi và kết
+thúc có kiểm soát. Vì thế, không nên đợi đến sát giới hạn cuối mới nhận ra
+rằng một chuỗi dài chưa thể hoàn thành.
+
+Nếu mô hình chính đã tiêu tốn trên 110 giây rồi thất bại, bản sửa trả một
+phản hồi có thể tiếp tục và chuyển phần dự phòng sang yêu cầu sau. Nó tránh
+chồng thêm cả ngân sách gọi dự phòng và kiểm tra vào yêu cầu đã chạy quá lâu.
+
+Đặt thời gian chờ dài hơn có thể giúp một số phản hồi kịp kết thúc, nhưng:
+  - Người dùng phải chờ lâu hơn cho từng lần thất bại.
+  - Có thể tiếp tục chạm giới hạn của hạ tầng.
+  - Không sửa lỗi tiếng Việt hay lỗi cấu trúc.
+  - Chưa có bằng chứng thời gian mới sẽ đủ cho đa số tài liệu.
+
+Do đó, tăng thời gian chờ đơn thuần chưa phải phương án đã được nghiệm thu.
+
+===============================================================================
+08. MISTRAL VÀ NEMOTRON: MÔ HÌNH NÀO GẶP LỖI NÀO?
+===============================================================================
+
+8.1. Mô hình chính
+
+Tên trong tích hợp:
+mistralai/mistral-large-4-1t-a52b
+
+Vai trò: ưu tiên thực hiện công việc tạo và kiểm tra học liệu.
+
+Quan sát:
+  - Bài trả lời ngắn đã thành công khi dùng điều khiển phù hợp.
+  - Các bài giáo dục được thử chưa hoàn tất trong hạn chính.
+  - Chưa có đủ đầu ra dài hoàn chỉnh và được chấp nhận để đánh giá toàn diện
+    chất lượng tiếng Việt của mô hình này trong Margin.
+
+8.2. Mô hình dự phòng
+
+Tên trong tích hợp:
+nvidia/nemotron-3.5-lightning-30b-a3b
+
+Vai trò: được gọi khi mô hình chính gặp lỗi nhà cung cấp hoặc quá thời gian,
+theo các điều kiện của hệ thống.
+
+Quan sát:
+  - Đã tạo được các kế hoạch mục tiêu học tập ở những lần thử trước.
+  - Có thể trả bản nháp nhanh hơn trong một số mẫu: khoảng 9–10 giây.
+  - Bản tóm tắt có lỗi từ/cụm từ và xu hướng chép quá sát nguồn.
+  - Nhóm câu hỏi có dạng dữ liệu không hợp lệ.
+  - Lượt sửa có thể vẫn không đạt hoặc chạm giới hạn độ dài đầu ra.
+
+Việc có mô hình dự phòng giúp ứng dụng có thêm cơ hội tiếp tục. Nó không tự
+động bảo đảm hai mô hình có chất lượng giáo dục tương đương.
+
+8.3. Vấn đề cấu hình suy luận đã được phát hiện
+
+Trong đợt chẩn đoán, tài liệu catalog và tài liệu phiên bản phát hành không
+nhất quán về cách tắt/giảm suy luận. Một yêu cầu dùng giá trị none bị HTTP
+400; bài thử với low đã trả lời thành công.
+
+Mã đã chuyển sang cách chọn low/medium/high cho Mistral Large 4 hiện dùng.
+Đây là một lỗi tương thích điều khiển đã được sửa. Tuy nhiên, sau khi sửa,
+các bài giáo dục vẫn gặp chậm. Vì vậy không thể nói toàn bộ vấn đề chỉ là
+gửi sai tham số none.
+
+8.4. Một thử nghiệm mô hình khác
+
+Một endpoint Mistral Small 4 từng được liệt kê đã trả HTTP 410 trong phép
+thử chẩn đoán. Nó không được thêm vào mô hình chạy chính thức của ứng dụng.
+Báo cáo không đề xuất dựa vào một endpoint chưa được chứng minh còn phục vụ.
+
+===============================================================================
+09. LỖI CẤU TRÚC CÂU HỎI: GIẢI THÍCH BẰNG ĐẦU RA ĐÃ QUAN SÁT
+===============================================================================
+
+9.1. Ứng dụng cần nhận gì?
+
+Mỗi câu phải là một đơn vị hoàn chỉnh:
+
+  Câu số N
+    Nội dung câu hỏi
+    Loại câu: một đáp án / chọn tất cả đúng / chọn N đáp án
+    Các lựa chọn
+    Tập lựa chọn đúng
+    Giải thích chung
+    Giải thích cho từng lựa chọn
+    Căn cứ nguồn và vị trí trong tài liệu
+
+Nếu yêu cầu hai câu, phải nhận được hai đơn vị như vậy. Không thể có đáp án
+đúng mà không biết thuộc câu nào, hoặc có giải thích không gắn được với lựa
+chọn tương ứng.
+
+9.2. Đầu ra thực tế của mẫu hai câu
+
+Kết quả đã lưu có trường questions chứa sáu phần tử:
+  - Phần tử đầu: một đối tượng dữ liệu câu hỏi.
+  - Năm phần tử tiếp theo: chuỗi văn bản rời.
+
+Ở cấp ngoài cùng còn xuất hiện các trường đáp án/giải thích vốn cần nằm
+trong từng câu hỏi. Việc đó làm sai quan hệ giữa câu hỏi và phần trả lời.
+
+Sáu phần tử này không có nghĩa mô hình đã tạo sáu câu hợp lệ. Số đối tượng
+đầy đủ không khớp với hai câu được yêu cầu.
+
+Thông báo kiểm tra ghi nhận:
+Expected 2 complete assessment items.
+
+9.3. Vì sao JSON hợp lệ vẫn có thể sai?
+
+JSON là cách đóng gói dữ liệu bằng dấu ngoặc, tên trường và giá trị. Một phản
+hồi có thể đọc được về cú pháp nhưng vẫn dùng sai trường, sai kiểu hoặc sai
+số lượng. Giống một bảng có mở được nhưng dữ liệu bị điền sai cột.
+
+Mã hiện bật chế độ json_object cho Nemotron. Cấu trúc chi tiết của từng câu
+được yêu cầu trong hướng dẫn và kiểm tra sau khi nhận về; nó chưa được chứng
+minh là bị nhà cung cấp ép buộc chính xác ở mọi trường hợp.
+
+Đây là một giới hạn trong cách tích hợp hiện tại: yêu cầu mô hình làm đúng
+và kiểm tra lại giúp phát hiện lỗi, nhưng chưa bảo đảm lần tạo đầu tiên luôn
+trả dữ liệu đúng cấu trúc.
+
+9.4. Tại sao không tự ghép những đoạn rời thành câu hỏi?
+
+Với ngân hàng học tập có nhiều đáp án đúng, ghép bằng suy đoán có thể gắn sai
+khóa đáp án hoặc sai giải thích. Khi đó màn hình có thể nhìn bình thường
+nhưng người học bị chấm sai.
+
+Đối với mẫu này, hệ thống chọn từ chối và yêu cầu sửa. Đây là hành vi bảo vệ
+kết quả, không phải bằng chứng rằng nguyên nhân sinh dữ liệu sai đã được sửa.
+
+9.5. Lượt sửa tiếp theo đã gặp gì?
+
+Lượt sửa trả về trạng thái cho biết đầu ra chạm giới hạn trước khi hoàn tất.
+Thông báo ghi nhận:
+NVIDIA output was incomplete. Retry or use a shorter PDF.
+
+Trong ngữ cảnh mẫu đã chia nhỏ, câu gợi ý "use a shorter PDF" còn quá chung.
+Nó không chứng minh sách gốc quá dài, cũng không chứng minh người dùng phải
+tự cắt sách. Nó chỉ phản ánh việc phản hồi cụ thể chưa được hoàn tất.
+
+Phần giải thích lỗi cho người dùng cần tiếp tục được cải thiện để nói đúng
+bước hỏng và cách tiếp tục, thay vì gợi ý chung gây hiểu lầm.
+
+9.6. Lỗi cấu trúc khác lỗi đáp án y khoa như thế nào?
+
+Lỗi cấu trúc cho biết ứng dụng chưa có dữ liệu câu hỏi đủ tin cậy để sử dụng.
+Nó không tự chứng minh mọi mệnh đề y khoa trong đó đều sai. Nhưng khi câu hỏi
+chưa hợp lệ về cấu trúc, không thể coi khóa đáp án và chấm điểm đã được kiểm
+chứng trọn vẹn.
+
+===============================================================================
+10. LỖI TIẾNG VIỆT VÀ LỖI TÓM TẮT: VÍ DỤ CỤ THỂ
+===============================================================================
+
+10.1. Ví dụ lỗi từ
+
+Bản nháp đã ghi:
+"Giả thân răng và chân răng..."
+
+Đoạn nguồn đang nói về vị trí giữa các phần của răng. Từ bị đổi làm câu mất
+nghĩa tự nhiên. Đây là ví dụ trực tiếp trong nội dung đã lưu, không phải ví
+dụ giả định để minh họa báo cáo.
+
+10.2. Ví dụ mất thành phần thuật ngữ
+
+Một bản sửa đã dùng:
+"cổ răng phẫu"
+
+Cụm nguồn có thành phần "giải phẫu". Việc làm rơi một phần thuật ngữ cho thấy
+không thể chỉ kiểm tra rằng văn bản có dấu tiếng Việt rồi coi là đạt.
+
+Báo cáo nêu những khác biệt ngắn để minh họa chất lượng ngôn ngữ; không dùng
+chúng làm nội dung giảng dạy hoặc kết luận điều trị.
+
+10.3. Lỗi về quan hệ và cách diễn đạt
+
+Một bản sửa khác diễn đạt đường cổ răng như "mặt bao bọc". Việc chuyển từ
+một quan hệ vị trí sang cách diễn đạt khác như vậy cần được đối chiếu nguồn.
+Một câu có ngữ pháp tương đối trơn tru vẫn có thể làm sai quan hệ đang học.
+
+Vì thế, tiêu chí phải bao gồm:
+  - Đúng từ và thuật ngữ.
+  - Đúng quan hệ giữa các cấu trúc/khái niệm.
+  - Giữ điều kiện, ngoại lệ và mức chắc chắn của nguồn.
+  - Không thêm kiến thức ngoài nguồn rồi trình bày như lời của giáo trình.
+
+10.4. Lỗi độ dài và xu hướng chép lại
+
+Ở mẫu tóm tắt nhỏ gần nhất:
+  - Nguồn gửi xử lý: 6.492 ký tự.
+  - Mốc độ dài: 292 đơn vị cách nhau bởi khoảng trắng.
+  - Bản đầu: 1.314 đơn vị, bằng 4,50 lần mốc.
+  - Bản sửa: 1.047 đơn vị, khoảng 3,59 lần mốc.
+  - Trần kiểm tra tương ứng: 701 đơn vị, tức làm tròn lên 2,4 lần mốc.
+
+Cả hai vượt trần. Đọc trực tiếp còn thấy xu hướng giữ lại quá nhiều văn bản
+nguồn, thay vì tổ chức lại kiến thức thành một bản tóm tắt có giá trị học tập.
+
+Đơn vị cách nhau bởi khoảng trắng không đồng nhất với "từ" theo ngôn ngữ học
+tiếng Việt. Ví dụ "cấu tạo răng" được bộ đếm tính thành ba đơn vị. Báo cáo
+dùng cùng một cách đếm để các con số có thể so sánh được.
+
+Một bản dài hơn dự kiến không tự động sai y khoa. Tuy nhiên, trong trường
+hợp này nó đồng thời không đạt chức năng cô đọng và có lỗi ngôn ngữ quan sát
+được. Không thể tăng giới hạn độ dài rồi kết luận toàn bộ chất lượng đã đạt.
+
+10.5. Kiểm tra bằng AI đã từng bỏ sót
+
+Một bản tóm tắt trước đó đã qua lượt kiểm tra bằng mô hình, nhưng khi đọc
+trực tiếp vẫn thấy chép quá sát và từ ngữ lỗi. Kết quả đó sau đó bị loại và
+không được dùng như bằng chứng nghiệm thu của chuẩn hiện tại.
+
+Điều rút ra: mô hình tự kiểm tra hoặc một lượt kiểm tra AI khác vẫn có thể
+bỏ sót. Cần có mẫu chuẩn được con người đối chiếu, đặc biệt khi nâng chất
+lượng cho nội dung y khoa và nha khoa.
+
+===============================================================================
+11. PDF ĐỌC ĐƯỢC NHƯNG CHỮ TRÍCH XUẤT VẪN CÓ THỂ CÓ VẤN ĐỀ
+===============================================================================
+
+11.1. Hai việc khác nhau
+
+Hiển thị trang PDF là vẽ trang để người dùng nhìn. Trích xuất là chuyển các
+mảnh chữ trong PDF thành chuỗi văn bản để gửi đến AI. Trang nhìn đúng không
+bảo đảm chuỗi chữ lấy ra luôn đúng khoảng trắng, thứ tự và ký tự.
+
+Trong tài liệu này, một số chuỗi trích xuất có dạng:
+  Gi ữa
+  ph ần
+  đư ợc
+
+Một số font nhúng tách chữ có dấu thành các mảnh hoặc cung cấp độ rộng ký tự
+khác thường. Nếu chương trình thêm khoảng trắng theo từng mảnh, một tiếng
+Việt có thể bị tách sai.
+
+11.2. Đã sửa gì?
+
+Đã cải thiện việc ghép các mảnh chữ dựa trên vị trí hình học, xử lý một số
+trường hợp ký tự dấu có độ rộng bằng 0 và chuẩn hóa Unicode về NFC.
+
+Những thay đổi này giúp giảm lỗi. Hồ sơ hiện tại vẫn cho thấy một số khoảng
+trắng bất thường còn tồn tại; không có tuyên bố đã trích xuất hoàn hảo.
+
+11.3. Không nên suy ra điều gì?
+
+Không có căn cứ nói tệp của người dùng bị hỏng chỉ vì gặp các khoảng trắng
+này. Cũng chưa thể khẳng định mọi lỗi viết của Nemotron đều do PDF gây ra.
+Mô hình có thể còn gặp vấn đề làm theo hướng dẫn, cấu trúc trả lời hoặc diễn
+đạt độc lập với lỗi trích xuất.
+
+11.4. Giới hạn còn lại
+
+Ứng dụng hiện không có OCR đầy đủ và không diễn giải hình ảnh y khoa chỉ từ
+việc trang được hiển thị. Hình vẽ, bảng phức tạp, chú thích và bố cục nhiều
+cột có thể không được hiểu đầy đủ qua chữ trích xuất.
+
+Đã đi qua đủ trang không đồng nghĩa đã đọc hiểu mọi hình và mọi quan hệ
+trong tài liệu. Ghi chú giới hạn phải được giữ khi tạo học liệu.
+
+===============================================================================
+12. DÒNG THỜI GIAN CỦA CÁC LẦN THỬ QUAN TRỌNG
+===============================================================================
+
+Các mốc giờ dưới đây dùng giờ Việt Nam, ngày 27/11/2026. Không có mốc giờ
+chính xác được lưu thì báo cáo chỉ ghi thứ tự sự kiện, không tự đặt giờ.
+
+12.1. Các bước chẩn đoán trước các mẫu cuối
+
+  - Đã chạy bài thử nhận diện 222 trang và 11 bài.
+  - Đã tạo kế hoạch mục tiêu trên 23 phần, tổng 264 mục tiêu.
+  - Có bản tóm tắt được kiểm tra AI chấp nhận nhưng bị đọc thủ công loại.
+  - Đã sửa cách kiểm tra độ dài/đề mục và tăng ràng buộc chất lượng.
+  - Đã phát hiện tham số none không phù hợp với endpoint Mistral đang dùng.
+  - Bài ngắn với low trả lời được; bài dài vẫn quá chậm.
+  - Đã thực hiện phép đo streaming: bắt đầu nội dung ở giây 136,063,
+    chưa xong ở khoảng giây 170.
+
+12.2. Bài thử nhóm năm câu, bắt đầu 21:05:52
+
+  Tổng thời gian kiểm thử được ghi: 269,465 giây, khoảng 4 phút 29 giây.
+
+  Diễn biến:
+    Mistral quá thời gian.
+    Nhánh dự phòng gặp câu có trích dẫn không khớp chính xác nguồn.
+    Lượt tiếp theo tiếp tục gặp quá thời gian.
+
+  Kết luận: không có nhóm năm câu đạt để công nhận thành công.
+
+12.3. Mẫu tóm tắt nhỏ, bắt đầu 21:19:20
+
+  Yêu cầu thứ nhất:
+    150,014 giây. Mô hình chính quá thời gian; trả trạng thái có thể tiếp tục.
+
+  Yêu cầu thứ hai:
+    9,771 giây. Dự phòng trả nháp 1.314 đơn vị.
+    Nháp được giữ như bước trung gian, chưa được công nhận là tóm tắt đạt.
+
+  Yêu cầu thứ ba:
+    23,556 giây. Thực hiện bước sửa; nháp sửa có 1.047 đơn vị, vẫn không đạt.
+
+  Tổng thời gian bài thử khoảng 183,357 giây.
+  Tổng cộng 3 lượt gọi nhà cung cấp trong mẫu này.
+  Kết quả: thất bại về chất lượng, không có bản tóm tắt được chấp nhận.
+
+12.4. Mẫu hai câu, bắt đầu 21:24:21
+
+  Yêu cầu thứ nhất:
+    150,017 giây. Mô hình chính quá thời gian.
+
+  Yêu cầu thứ hai:
+    9,377 giây. Dự phòng trả bộ dữ liệu sai cấu trúc.
+
+  Yêu cầu thứ ba:
+    46,557 giây. Lượt sửa chạm giới hạn đầu ra, không hoàn tất.
+
+  Tổng thời gian bài thử: 205,966 giây, khoảng 3 phút 26 giây.
+  Hồ sơ mẫu tích lũy 6 lượt gọi khi tính cả 3 lượt của mẫu tóm tắt phía trên.
+  Kết quả: không có hai câu được chấp nhận.
+
+12.5. Kiểm thử phần mềm và bản dựng cuối
+
+  Khoảng 21:27:
+    95 kiểm tra tự động đạt.
+    5 kiểm tra tích hợp phải bật riêng được bỏ qua trong lượt kiểm tra thường.
+    Kiểm tra TypeScript và đóng gói production hoàn tất.
+
+  Khoảng 21:29:
+    Commit được đẩy lên nhánh riêng và pull request bản nháp được tạo.
+
+Các mốc này cho thấy việc có bản dựng thành công diễn ra cùng lúc vẫn còn
+lỗi nghiệm thu AI. Hai nhóm kết quả cần được trình bày riêng.
+
+===============================================================================
+13. MA TRẬN NGUYÊN NHÂN: ĐÃ CHỨNG MINH, GIẢ THUYẾT, CHƯA ĐO
+===============================================================================
+
+13.1. Đã xác nhận trực tiếp
+
+Vấn đề: phản hồi chính chưa hoàn tất trước hạn.
+Bằng chứng: các lần 150,014 và 150,017 giây; streaming chưa hoàn tất ở 170 giây.
+Tác động: không thể chuyển sang sử dụng nội dung hoàn chỉnh của Mistral.
+
+Vấn đề: cấu trúc hai câu sai.
+Bằng chứng: questions chứa một object và năm string; trường dữ liệu sai cấp.
+Tác động: không thể gắn câu, đáp án, giải thích để sử dụng đáng tin cậy.
+
+Vấn đề: đầu ra sửa bị cắt.
+Bằng chứng: phản hồi được báo finish_reason = length qua xử lý nhà cung cấp.
+Tác động: không có JSON/nội dung hoàn tất để chấp nhận.
+
+Vấn đề: tiếng Việt sai và nội dung thiếu cô đọng.
+Bằng chứng: các cụm từ mẫu, số lượng 1.314/1.047 so với mốc 292.
+Tác động: học liệu chưa thích hợp để phát hành theo chuẩn mới.
+
+Vấn đề: trích xuất còn khoảng trắng bất thường.
+Bằng chứng: các chuỗi chữ trong hồ sơ nguồn trích xuất.
+Tác động: đầu vào khó hơn và cần kiểm tra, chưa định lượng được mức đóng góp
+vào từng lỗi đầu ra.
+
+Vấn đề: quy trình tích hợp cũ gom nhiều bước tốn thời gian.
+Bằng chứng: đường gọi tạo -> kiểm tra -> sửa trong một lượt trước khi tách.
+Tác động: thời gian máy chủ có thể không đủ cho cả chuỗi.
+
+Vấn đề: mẫu trả lời ngắn không đủ đại diện.
+Bằng chứng: bài ngắn thành công nhưng các bài giáo dục lớn thất bại.
+Tác động: không được dùng kiểm tra kết nối làm giấy thông hành cho sản phẩm.
+
+13.2. Các giả thuyết cần phép thử có kiểm soát
+
+  - Hướng dẫn quá nhiều yêu cầu làm mô hình khó giữ đúng cấu trúc/độ dài.
+  - Chữ nguồn bị tách làm tăng công việc diễn giải và nguy cơ sửa sai từ.
+  - Năng lực tiếng Việt học thuật của mô hình dự phòng chưa phù hợp bài này.
+  - Thời gian suy luận/tốc độ sinh đầu ra hoặc tải dịch vụ làm Mistral chậm.
+  - Rút gọn hợp đồng đầu ra hoặc chia theo mục tiêu nhỏ hơn có thể cải thiện.
+
+Đây là các hướng điều tra, chưa phải kết luận đã chứng minh riêng từng yếu tố.
+
+13.3. Những điều chưa đo hoặc chưa xác nhận
+
+  - Tốc độ p50/p95 qua một tập mẫu lặp lại.
+  - Tỷ lệ hoàn tất thành công ở mỗi mô hình với cùng nguồn và cùng tiêu chí.
+  - Tỷ lệ lỗi thuật ngữ và lỗi điều kiện y khoa trên toàn sách.
+  - Chất lượng sau khi chuyên gia chấm độc lập.
+  - Tổng thời gian/quota của một ngân hàng đạt chuẩn hoàn chỉnh.
+  - Mức tải hạ tầng và hàng đợi thực tế phía NVIDIA.
+  - Hai tài khoản thật và iPhone vật lý của bản nâng cấp.
+
+13.4. Trách nhiệm của phần tích hợp
+
+Không nên quy toàn bộ lỗi cho NVIDIA hoặc cho sách PDF. Người triển khai
+phải chọn kích thước công việc phù hợp, ràng buộc đầu ra, kiểm tra nội dung,
+thiết kế tiếp tục khi lỗi và đo chất lượng bằng tình huống thật.
+
+Những phần đó đã được cải thiện nhưng chưa đủ để nghiệm thu bản nâng cấp.
+
+===============================================================================
+14. NHỮNG THAY ĐỔI ĐÃ THỰC HIỆN VÀ GIỚI HẠN CỦA TỪNG THAY ĐỔI
+===============================================================================
+
+14.1. Sửa điều khiển Mistral
+Đã làm: dùng low/medium/high theo endpoint đã thử, bỏ giả định none dùng được.
+Giới hạn: một phản hồi ngắn thành công; bài giáo dục vẫn chậm.
+
+14.2. Chia công việc nhỏ hơn
+Đã làm: nhóm câu hỏi giảm từ năm xuống hai; phần tóm tắt dài được chia theo
+nhóm trang khoảng 6.500 ký tự, giữ nguyên trang đơn quá lớn để tránh cắt điều
+kiện giữa trang.
+Giới hạn: mẫu hai câu và mẫu tóm tắt nhỏ vẫn thất bại. Đây chưa phải kích
+thước công việc đã được chứng minh tối ưu.
+
+14.3. Lưu bản nháp, kiểm tra và sửa thành các bước có thể tiếp tục
+Đã làm: lưu phản hồi hoàn tất, rồi chuyển yêu cầu sau sang bước AI tiếp theo.
+Giới hạn: không thể lưu thành "đã xong" một phản hồi chưa hoàn thành; chưa có
+lượt Drive thật đầy đủ của cơ chế mới được nghiệm thu trong giao diện.
+
+14.4. Giữ mô hình và nguồn đã dùng
+Đã làm: phản hồi lưu tên model thực sự trả lời; ghim tập nguồn ngoài theo
+phần để lần tiếp tục không đổi ngữ cảnh tìm kiếm ngoài ý muốn.
+Giới hạn: biết model/nguồn nào được dùng không chứng minh nội dung đúng.
+
+14.5. Chọn mã dòng nguồn thay vì tự chép trích dẫn
+Đã làm: mô hình chọn mã E; ứng dụng lấy nguyên dòng tương ứng từ nguồn.
+Giới hạn: mã dòng hợp lệ chỉ chứng minh có đoạn nguồn đó. Nó không chứng
+minh mọi lựa chọn và mọi suy luận trong câu hỏi đều theo đúng nguồn.
+
+14.6. Dùng ngữ cảnh gần mục tiêu khi viết câu hỏi
+Đã làm: đưa các dòng lân cận mục tiêu vào lời nhắc tạo câu; bước kiểm tra vẫn
+nhận cả phần nguồn để xét điều kiện.
+Giới hạn: điều kiện xa vị trí neo có thể quan trọng; cần kiểm tra nguy cơ
+thiếu ngữ cảnh bằng mẫu thật. Không được giả định vùng chữ gần luôn đủ.
+
+14.7. Kiểm tra độ dài và yêu cầu đề mục
+Đã làm: có mốc theo lượng nội dung, cận trên/cận dưới, giới hạn ký tự, kiểm
+tra đề mục và dấu hiệu tiếng Việt.
+Giới hạn: các phép kiểm tra này không hiểu đầy đủ y khoa. Văn bản có thể vượt
+qua tiêu chí hình thức nhưng vẫn diễn đạt sai quan hệ hoặc dùng sai thuật ngữ.
+
+14.8. Cải thiện vòng sửa
+Đã làm: có hướng dẫn lỗi cụ thể, sửa có giới hạn, kiểm tra lại; phản hồi bị
+loại không bị phát lại vô tận như một kết quả đã đạt.
+Giới hạn: sau nhiều vòng vẫn có thể không có đầu ra dùng được; thêm vòng sửa
+cũng tiêu tốn thời gian và hạn mức.
+
+14.9. Lưu và thay học liệu
+Đã làm: bản mới phải được chấp nhận và ghi trước khi dọn bản cũ cùng loại;
+thao tác cũ hoàn thành muộn không được thắng thao tác mới hơn.
+Giới hạn: Google Drive không cung cấp một giao dịch nguyên tử như hệ thống
+cơ sở dữ liệu; hành vi cạnh tranh và trễ liệt kê vẫn phải được kiểm chứng thật.
+
+14.10. Giao diện và chấm điểm
+Đã làm: hai hành động chính, phản hồi tiếng Việt, bộ câu hỏi hiển thị theo
+trang nhỏ, lựa chọn có định danh ổn định, chấm theo tập đáp án chính xác.
+Giới hạn: giao diện rõ và phép chấm ổn định không sửa được một khóa đáp án
+do AI tạo sai. Chất lượng khóa cần được kiểm tra trước khi phát hành.
+
+===============================================================================
+15. CƠ CHẾ LƯU TỪNG BƯỚC: LÀM ĐƯỢC GÌ, CHƯA LÀM ĐƯỢC GÌ?
+===============================================================================
+
+15.1. Ví dụ dễ hiểu
+
+Giả sử AI đã viết xong bản nháp nhưng chưa kịp kiểm tra. Trước đây, nếu cả
+yêu cầu hết thời gian, lần thử lại có thể phải viết nháp lại.
+
+Cơ chế mới giữ phản hồi nháp hoàn tất. Yêu cầu tiếp theo đọc lại nháp đó và
+dành lượt AI mới cho việc kiểm tra. Nếu cần sửa, quyết định kiểm tra cũng
+có thể được giữ để bước tiếp theo chỉ làm việc sửa.
+
+Một yêu cầu thường hoàn tất tối đa một phản hồi mô hình mới rồi nhường sang
+yêu cầu tiếp theo ở ranh giới suy luận. Một lỗi chính xảy ra nhanh vẫn có
+thể dẫn tới một lần thử dự phòng; mọi lần gọi nhà cung cấp thực sự vẫn phải
+được tính vào hạn mức.
+
+15.2. Những gì được gắn với bản lưu
+
+  - Tài khoản Google đang thực hiện.
+  - Lượt tạo học liệu cụ thể.
+  - PDF và phiên bản nội dung của PDF.
+  - Phần xử lý, quy tắc và dữ liệu đầu vào liên quan.
+  - Dấu nhận dạng yêu cầu gửi mô hình.
+  - Nội dung phản hồi và tên mô hình thực sự dùng.
+
+Các bản lưu có chữ ký kiểm tra toàn vẹn và nằm trong vùng dữ liệu riêng của
+tài khoản ở Drive theo triển khai. Chúng chưa phải bản học liệu được công bố.
+
+15.3. Xử lý vòng bị loại
+
+Nếu nội dung vẫn không đạt sau những lần sửa giới hạn, hệ thống đánh dấu
+vòng đó không đạt. Lần thử sau có thể tạo lại phần chưa đạt thay vì đọc mãi
+cùng một phản hồi sai trong bộ nhớ lưu.
+
+Sau ba vòng thất bại của phạm vi đó, cần bắt đầu lượt tạo mới. Các nhóm/phần
+đã chấp nhận ở ngoài phạm vi vòng suy luận vẫn có cơ chế lưu riêng; tuy vậy
+không nên hứa rằng mọi trường hợp bắt đầu lượt mới đều tái dùng được toàn bộ
+công việc của lượt cũ.
+
+15.4. Điều đã kiểm chứng
+
+Kiểm thử tự động đã mô phỏng một nháp bị loại, bước kiểm tra, bước sửa và
+bước kiểm tra lại rồi mới cho phép hoàn tất. Đã kiểm tra việc đọc lại phản
+hồi không phát sinh thêm lượt mô hình và không dùng nhầm ngữ cảnh tài khoản.
+
+Mẫu chạy AI thật có lưu file riêng cũng quan sát được việc đọc lại phản hồi
+trước để thực hiện bước sau. Nhưng mẫu đó cuối cùng không đạt chất lượng.
+
+15.5. Những giới hạn cần nói rõ
+
+  - Lưu theo bước không làm AI thông minh hơn.
+  - Chỉ phản hồi hoàn tất mới được coi là bước đã lưu có thể phát lại.
+  - Mẫu thật dùng file kiểm thử riêng không thay thế việc thử lưu Drive qua
+    ứng dụng đã đăng nhập.
+  - Mã nhận diện lượt đang tạo hiện được giữ ở sessionStorage của tab.
+  - Mở tab/thiết bị mới không có cơ chế hoàn chỉnh tự tìm và tiếp tục đúng
+    lượt còn dở của thiết bị cũ.
+  - Có bản lưu trên Drive không đồng nghĩa giao diện luôn tự khôi phục được
+    tất cả công việc sau mọi kiểu đóng ứng dụng.
+
+===============================================================================
+16. 95 KIỂM TRA TỰ ĐỘNG ĐẠT NGHĨA LÀ GÌ?
+===============================================================================
+
+16.1. Kết quả ghi nhận
+
+Lượt kiểm tra thường cuối cùng của mã nguồn:
+  - 95 kiểm tra đạt.
+  - 5 kiểm tra tích hợp bật riêng được bỏ qua trong lượt này.
+  - 28 tệp kiểm tra đạt, 5 tệp bỏ qua; tổng 33 tệp.
+  - Kiểm tra TypeScript đạt.
+  - Đóng gói bản production đạt.
+
+16.2. Các nhóm hành vi được kiểm tra
+
+  - Ghép chữ tiếng Việt và xác định phần/trang.
+  - Đảm bảo thứ tự và phạm vi xử lý không thiếu trang theo dữ liệu được gửi.
+  - Kiểm tra mục tiêu và số câu tương ứng.
+  - Từ chối dữ liệu không đúng trường, dạng câu hoặc nguồn.
+  - Chấm nhiều đáp án theo tập lựa chọn chính xác.
+  - Trộn vị trí lựa chọn nhưng giữ định danh khi chấm.
+  - Không gắn kết quả tài khoản này vào tài khoản khác.
+  - Không công bố bản mới khi lưu thất bại.
+  - Không để thao tác cũ hoàn thành muộn xóa/thay bản mới hơn.
+  - Không gắn bài làm cũ vào bộ câu hỏi mới.
+  - Tiếp tục nháp/kiểm tra/sửa qua nhiều yêu cầu.
+  - Giữ nguồn ngoài ổn định trong quá trình tiếp tục.
+  - Không lặp vô tận phản hồi đã bị loại.
+
+16.3. Những gì con số 95 không chứng minh
+
+  - Không có nghĩa đã hỏi NVIDIA 95 lần và cả 95 lần đều đúng.
+  - Không có nghĩa 95 câu hỏi y khoa đã được bác sĩ xác nhận.
+  - Không chứng minh tóm tắt toàn giáo trình đã hoàn thành.
+  - Không chứng minh hai tài khoản thật đã dùng đồng thời thành công.
+  - Không chứng minh trải nghiệm iPhone đã mượt trong mọi tình huống.
+
+Nhiều kiểm tra sử dụng dữ liệu mẫu và phản hồi mô phỏng để xác nhận logic
+của ứng dụng trong những trường hợp xác định. Đây là bằng chứng cần thiết
+cho phần mềm nhưng khác bằng chứng chất lượng của dịch vụ AI thật.
+
+16.4. Vì sao năm bài tích hợp được bỏ qua trong lượt thường?
+
+Các bài này cần điều kiện bật riêng, tệp riêng hoặc sử dụng dịch vụ thật có
+hạn mức. Chúng không tự chạy trong mỗi lượt kiểm thử phần mềm.
+
+Các lần chạy thật được trình bày riêng trong báo cáo. Lần thử tóm tắt và
+câu hỏi mới đã thất bại; không được đổi tên các thất bại đó thành "bỏ qua"
+để tạo ấn tượng tất cả đều đạt.
+
+16.5. Build thành công chứng minh gì?
+
+Nó xác nhận ứng dụng có thể được biên dịch và đóng gói theo cấu hình đã thử.
+Nó không chạy mọi tài khoản, mọi PDF và mọi phản hồi AI có thể xuất hiện.
+Vì vậy build/Vercel success và nghiệm thu chất lượng học liệu là hai loại
+bằng chứng cần được báo riêng.
+
+===============================================================================
+17. HẠN MỨC AI VÀ PHÉP TÍNH CHO KẾ HOẠCH 264 MỤC TIÊU
+===============================================================================
+
+17.1. Mặc định hiện có
+
+Mã đặt mặc định 200 lượt gọi AI mỗi tài khoản mỗi ngày UTC, có biến cấu hình
+AI_DAILY_CALL_LIMIT để điều chỉnh trong giới hạn được phép của mã.
+
+Khi lập báo cáo, file local không ghi đè giá trị này nên ứng dụng local dùng
+mặc định 200. Không thực hiện đọc lại cấu hình bí mật production trong việc
+viết báo cáo; không khẳng định giá trị production đã được đối chiếu lần này.
+
+Ngày UTC đổi lúc 07:00 sáng theo giờ Việt Nam. Mốc này khác 00:00 giờ Việt Nam.
+
+Một lần tạo nháp, một lần kiểm tra, một lần sửa hoặc một lần gọi dự phòng
+đều có thể là một lượt gọi nhà cung cấp riêng. Đọc lại kết quả đã lưu không
+phát sinh thêm lượt mô hình mới.
+
+17.2. Phép tính từ chính kế hoạch đã lưu
+
+Các phần hiện có tổng 264 mục tiêu, mỗi mục tiêu dự kiến một câu.
+Mỗi nhóm mới chứa tối đa hai câu, và nhóm không vượt qua ranh giới phần.
+
+Số nhóm = tổng của làm tròn lên (số mục tiêu mỗi phần / 2)
+         = 137 nhóm.
+
+Trong kịch bản lý tưởng:
+  - Mỗi nhóm chỉ cần một lần tạo và một lần kiểm tra.
+  - Không lỗi cấu trúc, không sửa, không thử dự phòng, không hết thời gian.
+
+Khi đó:
+  137 lượt tạo + 137 lượt kiểm tra = 274 lượt.
+
+Nếu tính thêm một lượt lập kế hoạch cho mỗi phần có nội dung:
+  274 + 22 = 296 lượt.
+
+Đây là phép tính tối thiểu theo kế hoạch và cách chia nhóm hiện tại, không
+phải số lượt thực tế đã tiêu thụ và không phải một lượt nghiệm thu đã chạy.
+
+Nếu 22 kế hoạch đã có thể tái dùng trong đúng lượt ứng dụng, phần tạo và
+kiểm tra câu hỏi lý tưởng vẫn cần 274 lượt, vượt mặc định 200. Hồ sơ kế hoạch
+riêng của bài kiểm thử không tự trở thành kế hoạch của một phiên ứng dụng.
+
+17.3. Ý nghĩa đối với sản phẩm
+
+Ngay cả khi chữa được lỗi model, kế hoạch này vẫn không thể được hứa là sẽ
+hoàn thành trong một ngày quota mặc định bằng những lượt gọi mới từ đầu.
+Các lần sửa, thất bại và dự phòng có thể làm con số tăng thêm.
+
+Chia nhóm nhỏ hơn giúp mỗi yêu cầu nhẹ hơn nhưng tăng số lượt gọi. Đây là
+đánh đổi cần thiết kế và đo; không thể chỉ giảm số câu mỗi nhóm mà bỏ qua
+hạn mức và tổng thời gian của người dùng.
+
+17.4. Việc cần làm tiếp
+
+  - Tính ngân sách dự kiến sau khi lập kế hoạch.
+  - Cho người dùng biết nếu công việc lớn có thể qua nhiều kỳ quota.
+  - Đảm bảo tiếp tục công việc thực sự bền vững qua việc đóng/mở lại.
+  - Đánh giá lại kích thước nhóm dựa trên tỷ lệ đầu ra đạt, không chỉ tốc độ.
+  - Chỉ thay đổi hạn mức sau khi hiểu chi phí và khả năng chịu tải.
+
+Không có điều chỉnh hạn mức hoặc mua thêm hạ tầng nào trong việc viết báo cáo.
+
+17.5. Không nhầm giới hạn 800 câu với năng lực thực tế
+
+800 là trần an toàn của một ngân hàng trong mã; nó không chứng minh ứng dụng
+đã tạo thành công 800 câu, không bảo đảm đủ quota và cũng không bảo đảm dữ
+liệu vẫn nằm dưới giới hạn dung lượng lưu.
+
+===============================================================================
+18. BẢO MẬT, GOOGLE DRIVE, THAY HỌC LIỆU VÀ NHIỀU TÀI KHOẢN
+===============================================================================
+
+18.1. Những nguyên tắc được giữ
+
+  - Chỉ tài khoản Google được cho phép mới truy cập tài nguyên được bảo vệ.
+  - Yêu cầu Drive dùng quyền của tài khoản đang đăng nhập.
+  - PDF gốc tiếp tục ở Drive của người dùng.
+  - Học liệu, bài làm, tiến trình và bản lưu xử lý thuộc dữ liệu ứng dụng
+    trong Drive của tài khoản đó.
+  - NVIDIA key dùng ở phía máy chủ.
+  - Không thêm Supabase hoặc cơ sở dữ liệu được lưu trữ bên ngoài.
+  - Bản nâng cấp không đổi OAuth origin đang được bảo vệ.
+
+18.2. Thay học liệu hiện hành
+
+Thiết kế giữ một tóm tắt và một quiz hiện hành riêng cho mỗi PDF.
+Một bản mới phải được kiểm tra và lưu trước khi dọn các bản cũ cùng loại.
+
+Việc dọn chỉ nhằm vào học liệu cũ có liên quan và bài làm thuộc đúng quiz
+cũ. PDF gốc, thông tin đăng nhập, tiến trình đọc và tài liệu khác không thuộc
+phạm vi xóa đó.
+
+18.3. Các trường hợp đã có kiểm thử mô phỏng
+
+  - Lưu bản mới thất bại.
+  - Thao tác tạo cũ hoàn tất sau thao tác mới.
+  - Dọn dữ liệu gặp lỗi hoặc liệt kê dữ liệu gặp lỗi.
+  - Gửi bài làm của quiz cũ trong khi đã có quiz thay thế.
+  - Phản hồi trình duyệt đến muộn sau khi người dùng đổi học liệu đang xem.
+  - Bản lưu có chữ ký nhưng thuộc tài khoản/phạm vi khác.
+
+18.4. Giới hạn kiến trúc cần trung thực
+
+Google Drive có thể trả danh sách chậm cập nhật. Các thao tác ghi, chọn bản
+hiện hành và dọn bản cũ không phải một giao dịch nguyên tử của cơ sở dữ liệu.
+
+Nếu máy chủ đã ghi thành công nhưng phản hồi về trình duyệt bị mất, người
+dùng có thể thấy lỗi dù bản mới thực sự đã nằm trong Drive. Giao diện phải
+hướng dẫn mở lại kiểm tra, không khẳng định chắc chắn rằng mọi thứ đã được
+hoàn tác.
+
+Hạn mức và số lượt hoạt động đồng thời có lớp bảo vệ trong tiến trình máy
+chủ và qua bản ghi Drive. Chúng chưa phải một bộ đếm toàn hệ thống chính xác
+tuyệt đối giữa mọi instance Vercel. Không có bằng chứng lạm dụng được phát
+hiện trong đợt này; đây là giới hạn thiết kế đã được ghi nhận.
+
+18.5. Điều chưa thể chứng nhận
+
+Kiểm thử mô phỏng có giá trị, nhưng chưa thay thế một lần quan sát hai tài
+khoản thật dùng đồng thời với tài liệu, tác vụ, bài làm và lỗi độc lập.
+Bản nâng cấp chưa được tuyên bố đã qua nghiệm thu thực tế đó.
+
+===============================================================================
+19. NGUỒN THAM KHẢO Y KHOA VÀ GIỚI HẠN CỦA VIỆC ĐỐI CHIẾU
+===============================================================================
+
+19.1. Ba vai trò cần phân biệt
+
+  Nguồn học tập:
+    PDF người học đưa vào. Dùng để xác định nội dung và cấu trúc đang học.
+
+  Nguồn thiết kế câu hỏi:
+    Ví dụ đề thi, hướng dẫn viết câu hỏi và tài liệu khảo thí.
+    Dùng để học cách xây dựng câu, không sao chép đề và không dùng đáp án
+    của một ngân hàng bất kỳ làm thẩm quyền y khoa.
+
+  Nguồn kiểm chứng y khoa:
+    Hướng dẫn chuyên môn và nghiên cứu phù hợp để đối chiếu nhận định.
+    Phải ghi rõ năm, phạm vi và mức độ đã thực sự đọc/kiểm tra.
+
+19.2. Những gì đã được khảo sát trong đợt nâng cấp
+
+  - Giáo trình Răng Hàm Mặt 2022 dùng làm tài liệu đại diện.
+  - LetQA Nội cơ sở 2 để quan sát cách trình bày và kiểu câu hỏi tiếng Việt.
+  - Một đáp án thi của trường đại học để nhận diện định dạng, không coi đó
+    là tập câu hỏi đầy đủ vì tài liệu không có đủ câu dẫn.
+  - Một số tài liệu công khai của NBME, INBDE và hướng dẫn khảo thí đại học.
+  - Các đoạn liên quan trong hướng dẫn Bộ Y tế năm 2015 và một ghi chú ADA.
+  - Tìm kiếm bài nghiên cứu qua Europe PMC với chủ đề công khai cố định.
+
+Không có tuyên bố đã đọc toàn bộ mọi tài liệu trên. Phần hướng dẫn bị chặn
+bởi biểu mẫu không được lách qua và không được tính là đã đọc đầy đủ.
+
+19.3. Một phép thử tìm kiếm thực tế
+
+Đã ghi nhận một lần Europe PMC trả HTTP 200 trong 1,831 giây, có ba kết quả,
+hai kết quả chứa tóm tắt nghiên cứu.
+
+Nhận được bài nghiên cứu không chứng minh mọi câu trong giáo trình đã được
+kiểm chứng. Nó cũng không biến một nghiên cứu thành hướng dẫn hiện hành.
+
+19.4. Giới hạn hiện tại
+
+Một số ghi chú được tuyển chọn và ghi rõ ngày/năm. Không có cơ chế đã được
+chứng minh kiểm chứng cập nhật toàn bộ mọi nhận định của mọi PDF. Hướng dẫn
+2015 không được tự động coi toàn bộ vẫn mới vào năm 2026.
+
+Thông tin ngoài PDF phải được phân biệt với kiến thức do PDF trình bày.
+Không được âm thầm thay lời giáo trình bằng kiến thức khác rồi nói vẫn là
+tóm tắt nguyên nguồn.
+
+===============================================================================
+20. TRẠNG THÁI NGHIỆM THU THEO TỪNG KHẢ NĂNG CỦA SẢN PHẨM
+===============================================================================
+
+Khả năng: biên dịch và đóng gói.
+Trạng thái: đạt trong lần kiểm tra đã ghi.
+Bằng chứng: TypeScript và production build thành công.
+
+Khả năng: logic phần mềm trong các tình huống kiểm thử.
+Trạng thái: 95 kiểm tra đạt.
+Giới hạn: không đồng nghĩa mọi trường hợp thực tế đã được thử.
+
+Khả năng: mở/đọc giáo trình thật trong phiên đã đăng nhập.
+Trạng thái: đã quan sát một phần luồng local.
+Giới hạn: chưa có báo cáo hiệu năng đủ mọi trang và thiết bị.
+
+Khả năng: trích xuất đủ trang và nhận diện bài.
+Trạng thái: đủ 222 trang, nhận diện 11 bài trong hồ sơ kiểm thử.
+Giới hạn: còn chữ tách; chưa hiểu đầy đủ hình ảnh.
+
+Khả năng: lập kế hoạch câu hỏi.
+Trạng thái: có 264 mục tiêu từ kế hoạch đã lưu ở đợt trước.
+Giới hạn: có ghi chú giới hạn, chưa được chuyên gia nghiệm thu bao phủ.
+
+Khả năng: tóm tắt toàn giáo trình theo chuẩn hiện tại.
+Trạng thái: chưa đạt.
+Lý do: mẫu nhỏ vẫn quá thời gian chính và đầu ra dự phòng không đạt.
+
+Khả năng: ngân hàng câu hỏi toàn giáo trình theo chuẩn hiện tại.
+Trạng thái: chưa đạt.
+Lý do: mẫu nhóm câu vẫn sai cấu trúc hoặc chưa hoàn tất.
+
+Khả năng: tiếp tục bước suy luận sau gián đoạn.
+Trạng thái: có kiểm thử logic và quan sát phát lại bằng file riêng.
+Giới hạn: chưa hoàn tất nghiệm thu Drive qua ứng dụng cho cơ chế mới.
+
+Khả năng: tạo -> lưu Drive -> mở lại -> thay bản -> xử lý lỗi.
+Trạng thái: chưa nghiệm thu toàn chuỗi cho chế độ mới và giáo trình thật.
+
+Khả năng: hai tài khoản thật đồng thời.
+Trạng thái: chưa quan sát đầy đủ trong bản nâng cấp.
+
+Khả năng: trải nghiệm iPhone vật lý/Home Screen.
+Trạng thái: chưa có kết quả đủ để nghiệm thu bản nâng cấp.
+
+Khả năng: nội dung được chuyên gia y khoa/giáo dục xác nhận.
+Trạng thái: chưa có.
+
+Khả năng: phát hành bản nâng cấp lên web chính.
+Trạng thái: đang giữ, chưa merge vào main.
+
+===============================================================================
+21. TRÌNH TỰ KHẮC PHỤC ĐƯỢC ĐỀ XUẤT
+===============================================================================
+
+Các mục dưới đây là việc cần làm tiếp, không phải lời khẳng định đã hoàn tất.
+Không có quá trình tự chạy nền nào được tạo chỉ bởi nội dung báo cáo này.
+
+21.1. Ưu tiên một: xây tập mẫu nhỏ được kiểm tra thủ công
+
+Chọn các đoạn thật đại diện cho giải phẫu, cơ chế, dấu hiệu, phân biệt chẩn
+đoán, điều kiện điều trị và các trường hợp có số/đơn vị. Mỗi đoạn cần biết
+những quan hệ bắt buộc phải giữ và những sai lệch không được chấp nhận.
+
+Mục đích: tránh thay hướng dẫn rồi chỉ nhìn một câu trả lời có vẻ trơn tru
+để kết luận đã sửa được chất lượng.
+
+21.2. Ưu tiên hai: tách nguyên nhân bằng thử nghiệm có kiểm soát
+
+Với cùng đoạn và cùng tiêu chí, so sánh:
+  - Chữ trích xuất gốc và chữ đã được người kiểm tra sửa khoảng trắng.
+  - Lời nhắc đầy đủ và lời nhắc gọn giữ nguyên điều kiện quan trọng.
+  - Một câu và hai câu mỗi nhóm.
+  - Mistral chính và Nemotron, ghi rõ mô hình nào thực sự trả lời.
+
+Chỉ thay một yếu tố quan trọng trong mỗi so sánh. Ghi thời gian đến dữ liệu
+đầu tiên, đến câu trả lời đầu tiên, đến phản hồi hoàn tất, số lượt sửa và
+tỷ lệ đạt nội dung. Không đánh giá chỉ bằng thời gian có phản hồi HTTP.
+
+21.3. Ưu tiên ba: cải thiện hợp đồng dữ liệu
+
+Đánh giá khả năng ràng buộc cấu trúc được endpoint đang dùng hỗ trợ thực sự.
+Nếu có, thử trên endpoint đó trước khi tích hợp. Nếu không, cần thiết kế
+đầu ra gọn hơn, sửa đúng phần sai và kiểm tra chặt trước khi nhận.
+
+Không tự ghép khóa đáp án từ các đoạn văn rời bằng phỏng đoán. Giữ được
+cú pháp JSON mới chỉ là điều kiện đầu tiên, còn phải đúng cấu trúc từng câu.
+
+21.4. Ưu tiên bốn: nâng chất lượng tiếng Việt bằng bằng chứng
+
+Giảm lỗi trích xuất có thể sửa bằng hình học/Unicode mà không đoán lại nghĩa.
+Thêm mẫu hiệu chuẩn lấy từ lỗi đã quan sát. Kiểm tra thuật ngữ theo chính
+nguồn và đối chiếu quan hệ, không chỉ dò vài từ tiếng Việt thông dụng.
+
+Nếu mô hình dự phòng không đạt bộ mẫu chuẩn, không được âm thầm dùng nó rồi
+gắn mức tin cậy ngang mô hình chính. Cần một quyết định rõ về việc dừng có
+thông báo hoặc chỉ dùng dự phòng ở các tác vụ mà nó đã được chứng minh đạt.
+
+21.5. Ưu tiên năm: hoàn thiện khả năng tiếp tục và ngân sách
+
+Kiểm tra cơ chế lưu từng bước trên Drive thật qua API của ứng dụng. Thử đóng
+tab, mở lại, đổi thiết bị, lỗi lưu và lỗi nhận phản hồi. Xác định cách tìm lại
+lượt còn dở bằng danh tính tài khoản và tài liệu, thay vì chỉ dựa vào tab cũ.
+
+Đưa phép tính quota vào lập kế hoạch. Cân bằng số câu mỗi nhóm, kích thước
+phản hồi, chất lượng, tổng số gọi và thời gian chờ.
+
+21.6. Ưu tiên sáu: mở rộng lần lượt quy mô kiểm thử
+
+Sau khi mẫu nhỏ đạt ổn định:
+  Một phần -> một bài hoàn chỉnh -> nhiều bài khác loại -> toàn bộ giáo trình.
+
+Mỗi lần mở rộng phải kiểm tra tỷ lệ đạt, bao phủ mục tiêu, trùng ý, cấu trúc,
+thuật ngữ và tổng thời gian. Nếu thất bại thì giữ kết quả đo, không đổi tiêu
+chí để biến lỗi thành thành công.
+
+21.7. Ưu tiên bảy: nghiệm thu ứng dụng thật và phát hành
+
+Thực hiện đầy đủ tạo, lưu, tải lại, làm bài, tạo thay thế và mô phỏng lỗi.
+Tiếp theo thử hai tài khoản và thiết bị thật. Chỉ sau đó mới quyết định gộp
+nhánh và đưa lên web chính; ghi chính xác commit và kết quả triển khai.
+
+===============================================================================
+22. ĐIỀU KIỆN ĐỂ ĐƯỢC PHÁT HÀNH VÀ CÁCH ĐO CHẤT LƯỢNG
+===============================================================================
+
+22.1. Điều kiện tối thiểu về đầu ra
+
+  - Có tóm tắt toàn tài liệu, theo đúng các bài/đề mục thực chất.
+  - Có ngân hàng câu hỏi hoàn chỉnh theo kế hoạch đã được rà soát.
+  - Không còn lỗi cấu trúc ở học liệu được công bố.
+  - Không có câu đang dang dở, khóa đáp án thiếu hoặc giải thích sai vị trí.
+  - Có căn cứ nguồn đúng và giữ các điều kiện làm thay đổi kết luận.
+  - Các giới hạn trích xuất/bao phủ được thông báo trung thực.
+
+22.2. Điều kiện về ngôn ngữ và kiến thức
+
+Mẫu được đọc thủ công phải không còn những lỗi rõ như đổi từ, rơi thuật ngữ,
+đảo vị trí hoặc bỏ ngoại lệ quan trọng. Bản tóm tắt phải tổng hợp được quan
+hệ chứ không chỉ chép dài. Câu hỏi phải có mục tiêu khác nhau có ý nghĩa.
+
+Kiểm tra của chuyên gia cần được ghi thành bằng chứng riêng nếu muốn tuyên
+bố chất lượng y khoa/giáo dục đã được chuyên môn nghiệm thu. Không thay thế
+người kiểm tra bằng việc đếm số lượt AI nói valid = true.
+
+22.3. Điều kiện về tốc độ
+
+Cần đo trên nhiều mẫu và nhiều lần: thời gian hoàn tất có chất lượng, tỷ lệ
+thành công ngay, tỷ lệ phải sửa, tỷ lệ hết hạn và tổng lượt gọi.
+
+Chưa có cơ sở đặt một lời hứa như "toàn sách mất X phút" trong báo cáo này.
+Mốc thời gian sản phẩm chỉ nên được chốt sau khi có phân bố số đo thực tế,
+không dựa trên một câu trả lời ngắn thành công.
+
+22.4. Điều kiện về lưu trữ và thay thế
+
+Học liệu đạt phải lưu được, mở lại đúng sau tải trang, giữ bài làm đúng quiz,
+và thay đúng bản hiện hành. Các thử nghiệm thất bại phải chứng minh bản cũ
+vẫn có thể được tìm và dùng theo hành vi đã thiết kế.
+
+22.5. Điều kiện về riêng tư và thiết bị
+
+Hai tài khoản thật cần đồng thời thực hiện tác vụ mà không đọc nhầm thư viện,
+kết quả, bài làm hoặc tiến trình. iPhone cần được thử thao tác đọc, cuộn,
+đóng/mở bảng học tập, làm bài và tiếp tục sau gián đoạn mạng.
+
+22.6. Điều kiện về báo cáo
+
+Mỗi kết quả phải gắn với commit, cấu hình không bí mật và dữ liệu kiểm thử.
+Phải phân biệt rõ:
+  - Đạt tự động.
+  - Đạt chạy thật.
+  - Đã đọc thủ công.
+  - Đã được chuyên gia kiểm tra.
+  - Chưa thử.
+  - Thất bại.
+
+===============================================================================
+23. GIẢI ĐÁP NHỮNG CÂU DỄ HIỂU NHẦM
+===============================================================================
+
+Hỏi: Có phải API key của tôi sai không?
+Đáp: Các yêu cầu thật đã được nhận và có phản hồi thành công ở bài ngắn.
+Không có bằng chứng lỗi key là nguyên nhân của các mẫu chậm/sai cấu trúc
+được mô tả. Điều đó không thay thế kiểm tra mọi cấu hình trên mọi môi trường.
+
+Hỏi: Có phải Mistral viết tiếng Việt rất tệ không?
+Đáp: Các ví dụ từ/cấu trúc sai trong mẫu cuối đến từ Nemotron dự phòng.
+Mistral chính chưa trả xong bài đủ lớn để kết luận toàn diện chất lượng của
+nó trong quy trình này.
+
+Hỏi: Vì sao cần mô hình dự phòng?
+Đáp: Để có đường tiếp tục khi mô hình chính gặp lỗi. Nhưng dự phòng cũng
+phải qua chuẩn chất lượng; trả được dữ liệu không đồng nghĩa dữ liệu đạt.
+
+Hỏi: Chỉ cần chờ lâu hơn là xong phải không?
+Đáp: Chưa có bằng chứng bảo đảm như vậy. Chờ thêm không sửa được cấu trúc
+sai và thuật ngữ sai; còn có giới hạn thời gian của hạ tầng.
+
+Hỏi: Tạo hai câu mà vẫn mất hơn ba phút có bình thường không?
+Đáp: Đó là kết quả thất bại đã đo trong mẫu cụ thể, gồm thời gian chính hết
+hạn và các bước dự phòng/sửa. Báo cáo coi đó là vấn đề cần khắc phục, không
+đặt nó thành trải nghiệm mục tiêu cho sản phẩm.
+
+Hỏi: Sao trước đây đã dùng được mà bây giờ lại nói chưa đạt?
+Đáp: Những bài thử nhỏ và chuẩn cũ không đủ đại diện cho giáo trình tiếng
+Việt dài cùng yêu cầu mới về bao phủ, thuật ngữ, câu nhiều đáp án và phản
+hồi chi tiết. Lần thử đại diện hơn đã bộc lộ vấn đề chưa thấy ở mẫu nhỏ.
+
+Hỏi: 264 mục tiêu có phải đã có 264 câu hỏi không?
+Đáp: Không. Đó là danh sách nội dung dự kiến cần kiểm tra. Viết câu, xác
+minh đáp án, lưu và nghiệm thu cả bộ là những bước còn lại.
+
+Hỏi: Đã đọc đủ 222 trang thì có bảo đảm không thiếu kiến thức không?
+Đáp: Chưa. Số trang đã đi qua khác với mức hiểu hình ảnh, chất lượng chữ
+trích xuất và mức bao phủ các quan hệ kiến thức trong học liệu cuối.
+
+Hỏi: 95 kiểm tra đều đạt thì sao chưa phát hành?
+Đáp: Chúng kiểm tra các hành vi phần mềm trong điều kiện xác định. Bài chạy
+AI thật vẫn thất bại; phát hành chỉ vì build/test thường đạt sẽ bỏ qua bằng
+chứng quan trọng nhất về chất lượng học liệu.
+
+Hỏi: Có phải file PDF bị hỏng?
+Đáp: Đã mở và cuộn được PDF trong lần thử. Có lỗi khoảng trắng trong lớp chữ
+trích xuất, nhưng chưa có căn cứ quy toàn bộ lỗi cho việc tệp bị hỏng.
+
+Hỏi: Bản web chính đã bị thay bởi bản thử này chưa?
+Đáp: Nhánh main được kiểm tra lại vẫn ở commit cũ; nâng cấp nằm trên nhánh
+riêng và được đưa lên pull request bản nháp. Việc viết báo cáo không merge.
+
+Hỏi: Tạo báo cáo này có gọi AI thêm hoặc tiêu quota NVIDIA không?
+Đáp: Không chạy thêm suy luận NVIDIA để viết file. Báo cáo đọc lại dữ liệu,
+nhật ký đã có, mã nguồn và trạng thái GitHub; các phép tính được làm từ dữ
+liệu đó.
+
+===============================================================================
+24. HỒ SƠ BẰNG CHỨNG VÀ VỊ TRÍ MÃ NGUỒN CHO NGƯỜI TIẾP NHẬN
+===============================================================================
+
+Thư mục dự án local:
+C:\Users\ADMIN\Desktop\sharing\project\pdf-reader-ai
+
+Các đường dẫn tương đối dưới đây tính từ thư mục đó.
+
+24.1. Hồ sơ yêu cầu và quyết định
+
+  VIETNAMESE_LEARNING_CONTEXT.md
+    Yêu cầu nâng cấp tiếng Việt của người dùng.
+
+  VIETNAMESE_UPGRADE_REVIEW.md
+    Nguồn khảo sát, thay đổi, kết quả và giới hạn nghiệm thu.
+
+  STATUS.md
+    Mốc trạng thái hiện tại và lịch sử công việc.
+
+  ARCHITECTURE.md
+    Luồng dữ liệu, giới hạn, lưu trữ và hành vi thay học liệu.
+
+  AI_QUALITY_DECISIONS.md
+    Các quyết định chất lượng và ghi chú lịch sử liên quan.
+
+24.2. Hồ sơ đánh giá riêng trên máy
+
+  .git/review-fixtures/vietnamese-extracted-18k.json
+    222 trang, cấu trúc bài, nội dung học tập và 23 phần trích xuất.
+
+  .git/review-fixtures/vietnamese-18k-live.json
+    Kế hoạch mục tiêu, số lần gọi tích lũy của hồ sơ đó, sự kiện loại kết quả.
+    Tại lúc đối chiếu: 23 kế hoạch, 264 mục tiêu, 0 tóm tắt và 0 nhóm câu
+    được giữ như kết quả chấp nhận trong hồ sơ sau khi đã loại kết quả cũ.
+
+  .git/review-fixtures/vietnamese-step-live.json
+    Hai mẫu nhỏ cuối, phản hồi trung gian, sự kiện thời gian; tổng 6 lần gọi
+    trong hồ sơ mẫu này, không có summary/questions hoàn tất được chấp nhận.
+
+  .git/review-fixtures/mistral-stream-probe.json
+    Mốc thời gian nhận dữ liệu của phép đo streaming và phản hồi chưa xong.
+
+Các file trong .git/review-fixtures không nằm trong commit ứng dụng. Đó là
+hồ sơ đánh giá riêng, không phải bộ dữ liệu mẫu công khai để phân phối lại.
+Không cộng tùy tiện bộ đếm calls của các hồ sơ khác nhau thành tổng chi phí
+toàn dự án: chúng có phạm vi và lịch sử sử dụng khác nhau.
+
+Đính chính số liệu trong lần lập báo cáo:
+  Ghi chú trước đó nêu đoạn mẫu dài 6.483 ký tự. Tính lại trực tiếp theo
+  tệp nguồn và cách chia trang của mã hiện tại cho kết quả 6.492 ký tự.
+  Báo cáo này và hai hồ sơ STATUS/VIETNAMESE_UPGRADE_REVIEW đã được sửa lại.
+  Chênh lệch 9 ký tự không thay đổi mốc 292 đơn vị hoặc kết luận thử nghiệm.
+
+24.3. Các điểm vào mã nguồn quan trọng
+
+  src/lib/server/nvidia.ts
+    Gọi nhà cung cấp, điều khiển mô hình, quá thời gian, dự phòng, tạo và
+    kiểm tra tóm tắt/câu hỏi, xử lý nội dung không đạt.
+
+  src/lib/server/generation-checkpoints.ts
+    Ngữ cảnh lưu từng phản hồi, tiếp tục ở ranh giới bước, vòng bị loại và
+    ghi nhận tạm thời lỗi mô hình.
+
+  src/lib/server/checkpoint-store.ts
+    Đọc/ghi bản lưu riêng trên Drive và kiểm tra chữ ký, tài khoản, phạm vi.
+
+  src/lib/server/generation-input.ts
+    Chia phần tóm tắt, chọn ngữ cảnh gần mục tiêu và gắn trích dẫn theo mã dòng.
+
+  src/lib/server/pipeline.ts
+    Kiểm tra phần xử lý, kế hoạch, tập kết quả, bao phủ và hoàn tất học liệu.
+
+  src/lib/server/store.ts
+    Lưu học liệu, chọn bản hiện hành, xử lý thay thế và các bài làm liên quan.
+
+  src/lib/server/ai-admission.ts
+    Hạn mức theo tài khoản và bảo vệ số tác vụ đang hoạt động.
+
+  src/lib/client/extract.ts và src/lib/client/structure.ts
+    Ghép chữ, chia trang/phần, nhận diện bài và loại nội dung ngoài học tập.
+
+  src/lib/shared/education.ts và src/lib/shared/study-rules.ts
+    Chuẩn viết, mẫu hiệu chuẩn, phân bổ mục tiêu/dạng câu và chính sách độ dài.
+
+  src/lib/shared/quiz.ts và src/lib/shared/attempt-order.ts
+    Kiểm tra câu hỏi, đáp án và thứ tự hiển thị lựa chọn.
+
+  src/app/read/[id]/reader-client.tsx
+    Luồng thao tác đọc, tạo, tiếp tục, hiển thị kết quả và làm bài.
+
+  src/app/api/ai/chunk/route.ts
+    Route xử lý phần, hạn 240 giây nội bộ và khai báo maxDuration 300 giây.
+
+24.4. Các kiểm thử đáng đọc trước khi sửa
+
+  generation-checkpoints.test.ts
+  checkpoint-store.test.ts
+  pipeline-checkpoints.test.ts
+  pipeline-resume.test.ts
+  replacement.test.ts
+  vietnamese-generation.test.ts
+  generation-input.test.ts
+
+Các file này ở src/lib/server, kiểm tra tiếp tục, ràng buộc dữ liệu, thay thế
+và điều kiện từ chối. Các bài vietnamese-live.test.ts và
+vietnamese-step-live.test.ts là bài chạy thật có điều kiện bật riêng; không
+được coi kết quả test thường thay cho kết quả của chúng.
+
+24.5. Đường dẫn tham khảo về điều khiển mô hình
+
+Các trang đã được đối chiếu trong quá trình chẩn đoán:
+https://build.nvidia.com/mistralai/mistral-large-4-1t-a52b/apireference
+https://docs.nvidia.com/nim/large-language-models/2.1.4/get-started/advanced/get-started-mistral-large-4
+https://docs.mistral.ai/inference/conversations/reasoning
+
+Báo cáo ghi nhận mâu thuẫn đã gặp giữa catalog và phiên bản phát hành, cùng
+kết quả gọi thật. Nó không hứa các trang hoặc endpoint này sẽ không thay đổi.
+
+Chi tiết các nguồn giáo trình, khảo thí và đối chiếu y khoa khác nằm trong
+VIETNAMESE_UPGRADE_REVIEW.md, kèm phạm vi đã xem và giới hạn sử dụng.
+
+===============================================================================
+25. TRÁCH NHIỆM KỸ THUẬT VÀ PHẦN BÀN GIAO CÒN MỞ
+===============================================================================
+
+25.1. Điều cần nhận trách nhiệm rõ
+
+Phần triển khai đã tiến xa hơn mức bằng chứng nghiệm thu nội dung. Việc nói
+"đã nâng cấp" mà không nêu rõ lỗi chạy thật có thể khiến người dùng hiểu là
+đã dùng ổn. Cách báo cáo đúng phải đồng thời nêu phần mã đã làm và phần
+nghiệm thu chưa đạt.
+
+Quy trình tích hợp ban đầu chưa thích ứng đủ với thời gian phản hồi thực tế
+và chất lượng tiếng Việt của các mô hình được dùng. Sau khi tách bước và
+siết kiểm tra, kết quả vẫn chưa đạt. Không nên coi thêm hướng dẫn hoặc thêm
+kiểm tra là bằng chứng thay thế cho một lần học liệu thật đạt yêu cầu.
+
+25.2. Những việc còn mở quan trọng nhất
+
+  1. Xác định cấu hình/kích thước công việc tạo được đầu ra đạt trong thời gian
+     vận hành thực tế, qua nhiều mẫu.
+  2. Bảo đảm cấu trúc câu hỏi và khóa đáp án không bị lẫn.
+  3. Nâng chất lượng tiếng Việt và bảo toàn quan hệ kiến thức từ nguồn.
+  4. Đối chiếu kế hoạch mục tiêu để tránh thiếu nội dung hoặc lặp ý.
+  5. Hoàn thiện tiếp tục công việc lớn và thiết kế ngân sách hạn mức.
+  6. Hoàn thành nghiệm thu qua ứng dụng với Drive thật, hai tài khoản và thiết bị.
+  7. Chỉ phát hành revision đã được kiểm tra, kèm ghi nhận giới hạn còn lại.
+
+25.3. Những điều chưa được phép diễn đạt thành thành tích
+
+  - Chưa có tóm tắt toàn sách đạt chuẩn mới.
+  - Chưa có ngân hàng 264 câu được chấp nhận.
+  - Chưa có kiểm chứng mọi nhận định y khoa của sách.
+  - Chưa có bằng chứng hai tài khoản thật đồng thời cho bản nâng cấp.
+  - Chưa có chứng nhận chuyên gia hoặc hiệu năng iPhone vật lý.
+  - Chưa phát hành bản nâng cấp lên nhánh chính.
+
+25.4. Quyết định hiện tại
+
+Giữ bản nâng cấp trên nhánh kiểm tra và pull request bản nháp. Tiếp tục xử lý
+các lỗi theo bằng chứng trước khi cân nhắc phát hành. Báo cáo này là cơ sở
+để hiểu tình trạng và bàn giao công việc, không phải thông báo đã sửa xong.
+
+===============================================================================
+26. BẢNG THUẬT NGỮ VÀ CÁCH ĐỌC CÁC CON SỐ
+===============================================================================
+
+API:
+  Cách ứng dụng gửi yêu cầu đến một dịch vụ như Google Drive hoặc NVIDIA.
+
+Model/mô hình:
+  Hệ thống AI tạo hoặc đánh giá câu trả lời. Trong báo cáo có mô hình chính
+  Mistral và mô hình dự phòng Nemotron.
+
+Inference/suy luận:
+  Quá trình dịch vụ chạy mô hình để tạo phản hồi cho yêu cầu.
+
+Reasoning effort:
+  Điều khiển mức suy luận theo những giá trị endpoint hỗ trợ. Giảm mức này
+  không có nghĩa chắc chắn phản hồi sẽ nhanh hoặc chất lượng sẽ giữ nguyên.
+
+Token:
+  Đơn vị mà mô hình dùng để xử lý văn bản. Không đồng nhất với ký tự, tiếng
+  hay từ tiếng Việt. Không đổi số ký tự thành token/giây bằng hệ số tùy ý.
+
+Timeout/quá thời gian:
+  Hết hạn chờ cho một bước. Không đồng nghĩa API key sai hoặc cả hệ thống
+  không kết nối được.
+
+finish_reason = length:
+  Phản hồi chạm giới hạn độ dài trước khi hoàn tất. Khác với chờ quá thời gian.
+
+Fallback/dự phòng:
+  Chuyển sang mô hình khác theo điều kiện lỗi. Phải kiểm tra chất lượng riêng.
+
+JSON/schema:
+  JSON là dạng biểu diễn dữ liệu. Schema là quy tắc về trường, kiểu và quan
+  hệ dữ liệu cần có. JSON đọc được vẫn có thể không đúng schema của câu hỏi.
+
+Checkpoint/bản lưu bước:
+  Dữ liệu trung gian để tiếp tục công việc. Chưa phải học liệu được công bố.
+
+Artifact/học liệu:
+  Bản tóm tắt hoặc bộ câu hỏi được lưu như kết quả của ứng dụng.
+
+Blueprint/ma trận:
+  Kế hoạch mục tiêu và dạng câu. Có ma trận chưa có nghĩa đã có câu hỏi đạt.
+
+Exact-set scoring:
+  Chỉ đúng trọn câu khi tập lựa chọn người học chọn bằng đúng tập đáp án đúng.
+
+Unit test/kiểm thử tự động nhỏ:
+  Kiểm tra hành vi phần mềm trong điều kiện được xác định, thường có dữ liệu
+  hoặc phản hồi mô phỏng. Không thay thế nghiệm thu AI thật.
+
+Live test/kiểm thử thật:
+  Gọi dịch vụ hoặc dùng luồng thật. Phải nêu rõ dùng dữ liệu nào, mô hình nào
+  và có hoàn tất đúng điều kiện hay không.
+
+Production:
+  Bản chính dành cho người dùng. Khác với nhánh thử và bản dựng xem trước.
+
+Quota/hạn mức:
+  Số lượt gọi được cho phép theo thiết kế. Mỗi bước tạo/kiểm tra/sửa có thể
+  dùng một lượt riêng; số câu không bằng số lượt gọi.
+
+UTC:
+  Múi giờ dùng cho ngày của hạn mức hiện tại. Việt Nam nhanh hơn UTC 7 giờ.
+
+Quy tắc đọc báo cáo:
+  "Đã quan sát" = có kết quả trực tiếp trong hồ sơ.
+  "Đạt kiểm thử" = đạt phạm vi bài kiểm tra được nêu.
+  "Tính toán" = suy ra từ dữ liệu và giả định ghi rõ, chưa phải một lượt chạy.
+  "Giả thuyết" = cần thử nghiệm tiếp để xác định.
+  "Chưa nghiệm thu" = chưa đủ bằng chứng, không được tự đổi thành đã đạt.
+
+-------------------------------------------------------------------------------
+KẾT THÚC BÁO CÁO
+
+File không chứa giá trị API key, client secret, token đăng nhập hoặc bản chép
+toàn bộ giáo trình. Các ví dụ lỗi được trích ngắn để giải thích kết quả kiểm
+thử. Nội dung báo cáo phản ánh bằng chứng hiện có và những giới hạn được nêu,
+không thay thế việc sửa lỗi và chạy nghiệm thu tiếp theo.

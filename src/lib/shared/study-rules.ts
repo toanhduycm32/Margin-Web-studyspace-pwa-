@@ -1,6 +1,7 @@
+import { canonicalSummaryTarget, VIETNAMESE_STANDARD } from "./education";
 import type { ResponseType } from "./types";
 
-export const STUDY_RULE_VERSION = "2026-11-27-medical-4";
+export const STUDY_RULE_VERSION = "2026-11-28-source-selection-2";
 
 export type StudyDomain = "general" | "medical" | "dental";
 
@@ -20,128 +21,39 @@ export function classifyStudyDomain(text: string): StudyDomain {
   return "general";
 }
 
+// Legacy profile names remain accepted only for stored-job compatibility. The UI and
+// every current operation select this one canonical educational standard.
 export const SUMMARY_PROFILES = {
-  concise: {
-    label: "Quick",
-    purpose: "Fast review",
-    audience: "A learner revisiting material already read",
-    voice: "Direct, neutral, information-dense",
-    tone: "Precise without filler",
-    minWords: 65, baseWords: 115, maxWords: 190,
-    depth: "Retain the central claim, essential definitions, relationships and conclusions; omit repeated examples.",
-    terminology: "Keep source terminology and define only essential terms.",
-    formulas: "Preserve formulas only when necessary to retain the central meaning; never invent notation.",
-    examples: "Use a source example only when it explains an otherwise unclear idea.",
-    assumptions: "Retain qualifications that would change the claim if omitted.",
-    limitations: "State material limitations and extraction gaps.",
-    format: "Use coherent compact paragraphs under the source section heading; use lists only for genuine comparisons.",
-    attribution: "Ground every claim in the supplied pages; do not attribute inferred headings to the PDF.",
-    validation: "Check central meaning, necessary conditions, page support and excessive repetition.",
-    exceptions: "A very short source section can be shorter than the target; never pad it.",
-  },
-  academic: {
-    label: "Academic",
-    purpose: "A complete university-level overview",
-    audience: "A learner building a reliable first understanding",
-    voice: "Clear, technically precise and explanatory",
-    tone: "Academic but readable",
-    minWords: 140, baseWords: 260, maxWords: 390,
-    depth: "Explain important concepts, mechanisms, relationships, conclusions and representative source examples.",
-    terminology: "Preserve technical vocabulary and define terms when the source defines them.",
-    formulas: "Keep supported formulas, variable meanings, conditions and mathematical relationships.",
-    examples: "Use only important examples actually present in the source.",
-    assumptions: "State premises and conditions needed for correct interpretation.",
-    limitations: "Preserve the author's limits, uncertainty and extraction gaps.",
-    format: "Write connected paragraphs under meaningful section headings, avoiding fragmented micro-bullets.",
-    attribution: "Use the supplied page range as evidence; do not present external knowledge as source content.",
-    validation: "Check section coverage, conceptual relationships, technical accuracy and unsupported claims.",
-    exceptions: "Scale down for sparse sections and up for unusually dense sections without padding.",
-  },
-  deep: {
-    label: "Deep medical study",
-    purpose: "Understanding difficult technical material",
-    audience: "A learner who needs mechanisms and intermediate reasoning",
-    voice: "Analytical and pedagogically explanatory",
-    tone: "Rigorous and patient",
-    minWords: 260, baseWords: 470, maxWords: 720,
-    depth: "Explain definitions, mechanisms, intermediate relationships, cross-links and conclusions in detail.",
-    terminology: "Define source terms and preserve meaningful distinctions.",
-    formulas: "Retain supported notation, define symbols from the source and explain transformations and assumptions.",
-    examples: "Explain important source examples and why they illustrate the concept.",
-    assumptions: "Make prerequisites, boundary conditions and exceptions explicit.",
-    limitations: "State limitations, uncertainty and any visual or scanned content not interpreted.",
-    format: "Use substantial coherent paragraphs, short lists for true steps and tables only for useful comparisons.",
-    attribution: "Keep all factual claims tied to the supplied pages; label inferred structure.",
-    validation: "Check mechanisms, formulas, assumptions, relations, page support and clarity.",
-    exceptions: "Do not invent a worked example or lengthen thin material to meet a target.",
-  },
-  revision: {
-    label: "Exam revision",
-    purpose: "Efficient recall and retrieval",
-    audience: "A learner reviewing before practice",
-    voice: "Compact and exact",
-    tone: "Recall-oriented",
-    minWords: 75, baseWords: 150, maxWords: 240,
-    depth: "Prioritize definitions, distinctions, mechanisms, formulas and necessary conditions.",
-    terminology: "Keep technical terms and concise source-backed definitions.",
-    formulas: "Keep supported formulas with variable meanings and conditions.",
-    examples: "Include only a source example that prevents a likely confusion.",
-    assumptions: "Flag commonly confused conditions and exceptions when supported.",
-    limitations: "Note material uncertainty and extraction gaps.",
-    format: "Use compact bullets or a table when they improve scanning; avoid shallow flashcard fragments.",
-    attribution: "Ground each note in the supplied page range and label inferred headings.",
-    validation: "Check accuracy, recall usefulness, necessary qualifications and redundancy.",
-    exceptions: "A thin section may use fewer words than the nominal target.",
-  },
-  clinical: {
-    label: "Clinical review",
-    purpose: "Explain source-supported clinical reasoning for study",
-    audience: "A medical or dental learner reviewing mechanisms and decisions",
-    voice: "Careful, conditional and evidence-aware",
-    tone: "Clinical education, never patient-specific advice",
-    minWords: 180, baseWords: 330, maxWords: 530,
-    depth: "Connect presentation, mechanism, differential, investigation and management only where the source supports each link.",
-    terminology: "Preserve exact disease, anatomy, test and intervention terms; define ambiguous abbreviations from the source.",
-    formulas: "Keep supported thresholds, units and calculations together with population and conditions.",
-    examples: "Explain source cases as educational examples; do not invent patient findings.",
-    assumptions: "Keep age, setting, severity, contraindications, exclusions and time course when they change interpretation.",
-    limitations: "Label uncertainty, dated recommendations, missing visual findings and absent evidence explicitly.",
-    format: "Use concise sections for presentation, reasoning, investigations and management only when supported; otherwise explain the available concepts.",
-    attribution: "Separate what the PDF says from any external evidence; never invent a guideline or page citation.",
-    validation: "Check every clinical action against its stated population, indication and exception.",
-    exceptions: "Do not force a diagnosis or treatment pathway into basic science material.",
-  },
+  medical: { label: "Học tập Y khoa · Răng Hàm Mặt", purpose: "Hiểu và ôn tập đầy đủ tài liệu", minWords: 200, baseWords: 320, maxWords: 1600 },
 } as const;
-
-export type SummaryProfile = keyof typeof SUMMARY_PROFILES;
-
+export type SummaryProfile = "medical" | "concise" | "academic" | "deep" | "revision" | "clinical";
 export function summaryProfile(value: unknown): SummaryProfile {
-  if (typeof value !== "string" || !(value in SUMMARY_PROFILES)) throw new Error("Choose a valid summary style.");
+  if (!["medical", "concise", "academic", "deep", "revision", "clinical"].includes(String(value))) throw new Error("Thiết lập tóm tắt không hợp lệ.");
   return value as SummaryProfile;
 }
-
-export function sectionWordTarget(profile: SummaryProfile, characters: number): number {
-  const rules = SUMMARY_PROFILES[profile];
-  const scaled = Math.round(rules.baseWords * Math.sqrt(Math.max(100, characters) / 8_000));
-  return Math.max(characters >= 4000 ? rules.minWords : 35, Math.min(rules.maxWords, scaled));
+export function sectionWordTarget(_profile: SummaryProfile, characters: number): number {
+  return canonicalSummaryTarget(characters);
 }
-
-export function summaryInstruction(profile: SummaryProfile): string {
-  const rule = SUMMARY_PROFILES[profile];
-  return [rule.purpose, `Audience: ${rule.audience}.`, `Voice: ${rule.voice}. Tone: ${rule.tone}.`,
-    rule.depth, rule.terminology, rule.formulas, rule.examples, rule.assumptions, rule.limitations,
-    rule.format, rule.attribution, rule.validation, rule.exceptions].join(" ");
+export function summaryInstruction(_profile: SummaryProfile): string {
+  return `${VIETNAMESE_STANDARD} Tạo học liệu có cấu trúc theo bài và các đề mục thật, giữ định nghĩa, cơ chế, phân loại, quan hệ, điều kiện và ngoại lệ. Đoạn văn giải thích là chính; bảng/danh sách chỉ khi giúp so sánh hoặc biểu diễn trình tự. Bỏ lời giới thiệu hành chính, mục lục lặp và câu tự lượng giá. Không tự thêm kiến thức ngoài nguồn. Đề mục suy luận phải ghi rõ. Độ dài đo bằng đơn vị tách bởi khoảng trắng; mục lớn thông thường khoảng 200–400 đơn vị, phần phức tạp 400–800 hoặc hơn theo nguồn. Không thêm lời để đủ số lượng và không cắt điều kiện y khoa để rút ngắn.`;
 }
-
 export const QUESTION_FAMILIES = ["definition", "mechanism", "application", "comparison",
   "assumption", "error_analysis", "boundary_condition", "cross_concept",
   "clinical_presentation", "diagnostic_reasoning", "investigation", "management",
-  "contraindication", "integrated_case"] as const;
+  "contraindication", "integrated_case", "anatomical_relation", "etiology", "classification",
+  "complication", "material_property", "prevention", "pharmacology"] as const;
 
 export const CLINICAL_FAMILIES = ["mechanism", "clinical_presentation", "diagnostic_reasoning",
   "investigation", "management", "contraindication", "integrated_case"] as const;
 
 export const QUESTION_FAMILY_RULES: Record<typeof QUESTION_FAMILIES[number], string> = {
+  anatomical_relation: "Phân biệt vị trí, mặt, hướng, liên quan và chức năng cấu trúc. Nhiễu đảo quan hệ gần/xa, thân/chân, răng sữa/vĩnh viễn phải sai theo đúng điều kiện; không suy hình từ chú thích.",
+  etiology: "Phân biệt nguyên nhân, yếu tố nguy cơ và cơ chế. Không biến sự kết hợp thành nhân quả. Nhiễu nhầm vai trò hoặc bỏ điều kiện, không bịa căn nguyên mới.",
+  classification: "Áp dụng tiêu chí phân loại của đúng phiên bản nguồn; nêu đủ tiêu chí phân biệt. Không trộn hai hệ thống hoặc lấy ngưỡng ngoài PDF.",
+  complication: "Nối diễn biến bệnh với hậu quả hoặc biến chứng theo nguồn; phân biệt triệu chứng hiện tại, nguy cơ và biến chứng đã xảy ra. Giữ trình tự và điều kiện.",
+  material_property: "Liên hệ thành phần, cấu trúc, tính chất, thao tác và ứng dụng vật liệu. Nhiễu phải dùng sai một quan hệ, không đánh đồng độ bền cơ học với hiệu quả lâm sàng.",
+  prevention: "Phân biệt đối tượng, nguy cơ, biện pháp, mức dự phòng và kết cục. Giữ điều kiện triển khai; không coi một biện pháp đúng cho mọi đối tượng.",
+  pharmacology: "Phân biệt cơ chế, chỉ định, chống chỉ định, tác dụng bất lợi và tương tác có trong nguồn. Không tạo liều, thời gian dùng hoặc đơn thuốc ngoài PDF.",
   definition: "Test a source-defined term or distinction, not an isolated word match; use confusions with neighboring terms as distractors.",
   mechanism: "Ask why or how a process works under stated conditions; wrong options should reverse a step, cause or direction.",
   application: "Give a compact new scenario solvable using the source's rule; wrong options should misuse that rule or omit a condition.",
@@ -157,6 +69,19 @@ export const QUESTION_FAMILY_RULES: Record<typeof QUESTION_FAMILIES[number], str
   contraindication: "Test a supported exclusion, adverse effect or safety condition; distinguish absolute from conditional limitations.",
   integrated_case: "Connect two or more supported clinical concepts in a short educational case without inventing a medically consequential premise.",
 };
+
+export const ASSESSMENT_ITEM_RULES = `Độ khó: remember = nhận diện một dữ kiện; understand = giải thích/phân biệt một quan hệ; apply = áp dụng một quy tắc có điều kiện; analyze = kết hợp từ hai quan hệ được hỗ trợ. Không nâng độ khó bằng câu chữ rối, số liệu không cần thiết hay ngoại lệ ngoài nguồn.
+Khóa đáp án: kiểm tra từng lựa chọn dưới cùng điều kiện; một nhận định đúng nhưng ít liên quan không được gán sai. Nhiễu: đảo quan hệ, nhầm cơ chế, thiếu điều kiện, dùng nhầm tiêu chí hoặc lẫn nguyên nhân với hậu quả; phải có cơ sở giải thích rõ vì sao sai.
+Loại câu nếu thiếu dữ kiện phân biệt, có nhiều đáp án hợp lý ngoài khóa, lặp một mục tiêu bằng thay tên, hoặc cần kiến thức ngoài PDF. Giải thích phải nêu quan hệ được kiểm tra, áp dụng chứng cứ và sửa ngộ nhận của từng lựa chọn; không chỉ nhắc lại chữ đúng/sai.`;
+
+export function familyConstruction(family: string, includeCommon = true): string {
+  const clinical = ["clinical_presentation", "diagnostic_reasoning", "investigation", "management", "contraindication", "integrated_case", "pharmacology", "complication"].includes(family);
+  const relational = ["mechanism", "anatomical_relation", "cross_concept", "etiology", "material_property"].includes(family);
+  return `${QUESTION_FAMILY_RULES[family as keyof typeof QUESTION_FAMILY_RULES]}
+Chứng cứ cần có: ${clinical ? "đối tượng, tình huống, phát hiện phân biệt và điều kiện có thể làm đổi quyết định; thiếu điều kiện quyết định thì đổi mục tiêu, không tự thêm" : relational ? "ít nhất hai thành phần và quan hệ có hướng giữa chúng, không chỉ cùng xuất hiện trong một đoạn" : "định nghĩa hoặc tiêu chí rõ, kèm trường hợp áp dụng hoặc giới hạn của nguồn"}.
+Cách dựng câu: ${clinical ? "ca ngắn chỉ giữ dữ kiện cần thiết; nêu rõ đang hỏi nhận diện, chẩn đoán phân biệt, ý nghĩa xét nghiệm hay nguyên tắc xử trí" : relational ? "hỏi quan hệ, nguyên nhân hoặc hệ quả cụ thể; có thể cho thay đổi một điều kiện rồi suy kết quả được nguồn hỗ trợ" : "đặt hai khái niệm gần nhau hoặc một ví dụ phân loại; tránh câu điền lại nguyên văn"}.
+${includeCommon ? ASSESSMENT_ITEM_RULES : ""}`;
+}
 
 export function responseTargets(count: number): ResponseType[] {
   const all = Math.round(count * 0.6);
