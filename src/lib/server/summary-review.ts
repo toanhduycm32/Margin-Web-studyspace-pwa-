@@ -16,7 +16,19 @@ export const summaryReviewSchema = { type: "object", properties: {
 }, required: ["checks", "omissions"], additionalProperties: false };
 
 export function summaryReviewUnits(digest: string): string[] {
-  return digest.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+  // PDF line wrapping is not a semantic boundary. Keep a selected passage and
+  // its conditions together; headings and blank lines delimit review units.
+  const units: string[] = [];
+  let passage: string[] = [];
+  const flush = () => { if (passage.length) units.push(passage.join("\n")); passage = []; };
+  for (const raw of digest.split(/\r?\n/u)) {
+    const line = raw.trim();
+    if (!line) flush();
+    else if (/^#{1,6}\s/u.test(line)) { flush(); units.push(line); }
+    else passage.push(line);
+  }
+  flush();
+  return units;
 }
 
 function sourceProse(source: string): string {
@@ -30,7 +42,7 @@ function sourceCharacters(text: string): string {
 export function sourcePreservingIssue(source: string, digest: string): string | null {
   if (!isVietnameseProse(source)) return null; // Translation cannot be checked by literal source equality.
   const original = sourceCharacters(sourceProse(source));
-  const units = summaryReviewUnits(digest);
+  const units = digest.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
   for (let index = 0; index < units.length; index++) {
     const text = units[index].replace(/^#{1,6}\s+/u, "").replace(/^[-*•]\s+/u, "").replace(/\*\*|__/gu, "");
     if (!original.includes(sourceCharacters(text))) {
@@ -40,7 +52,7 @@ export function sourcePreservingIssue(source: string, digest: string): string | 
   return null;
 }
 
-// A complete, source-indexed decision is required for every displayed line.
+// A complete, source-indexed decision is required for every heading/passage.
 // Existence of an anchor is not a proof of the semantic judgment beside it.
 export function validateSummaryReview(value: Record<string, unknown>, source: string, digest: string, evidence: EvidenceSource[] = []) {
   const units = summaryReviewUnits(digest);

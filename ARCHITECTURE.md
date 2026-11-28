@@ -30,6 +30,8 @@ Final language policy candidate: MiniMax remains the primary for Vietnamese sour
 
 ## Data flow
 
+Review granularity follows complete selected passages and headings, not physical PDF line wraps. The source-custody renderer still preserves exact source characters/numeric boundaries, and the reviewer checks every claim inside each unit. This removes formatting-driven review expansion (114 physical lines to 26 units in the saved production draft) without removing content, raising token/time budgets or adding stages. The changed prompt hash invalidates only the corresponding review response; already checkpointed source-selection drafts remain reusable.
+
 Release checkpoint reconciliation: the bounded foreign-source quiz timed out safely before accepted output; a transport diagnostic confirms provider reasoning continued until the unchanged 260s deadline. Foreign-source quiz latency is not qualified. Preserve the full language functionality and disclose this limitation. The final attachment's release acceptance is a representative real Vietnamese chapter, not universal foreign-source performance: that chapter's content, quiz and persistence checks pass. No language restriction is introduced, and no further model campaign is justified. Actual deployed verification remains required before closure. See STATUS.md for the current delivery state and AI_QUALITY_DECISIONS.md for retained failures.
 
 ```text
