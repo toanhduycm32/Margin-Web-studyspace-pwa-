@@ -1,5 +1,7 @@
 # Architecture and operating limits
 
+Current delivery: production source 5a7c22a passed authenticated PDF reading, resumed summary generation/save/reload and preservation of the existing quiz/4-of-4 attempt on 28 November. MiniMax low is deployed for Vietnamese sources; explicit Mistral translation remains available with unqualified foreign-quiz latency. STATUS.md contains the authoritative release state. Provisional candidate/hold wording in the chronological decisions below is historical, not an instruction to repeat completed qualification.
+
 ## Current engineering decision — 28 November 2026
 
 The owner's “Engineering Workflow & AI Execution Redesign” attachment supersedes maximum-depth, one-objective/one-question and mandatory two-item batching assumptions. Protected outcomes are source-supported Vietnamese learning, major-section coverage, correct multiple-response keys, account isolation and safe replacement. Quantity, detail and advanced sophistication are adjustable. Historical reports remain evidence, not active design instructions.
