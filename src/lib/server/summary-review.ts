@@ -52,7 +52,8 @@ export function validateSummaryReview(value: Record<string, unknown>, source: st
   }
   const checks = value.checks.map((check, index) => {
     if (!check || check.unit !== index + 1 || typeof check.issue !== "string" || check.issue.length > 1200 ||
-        !Array.isArray(check.references) || check.references.length > 16 ||
+        !Array.isArray(check.references) || check.references.length > sourceCount + evidence.length ||
+        new Set(check.references).size !== check.references.length ||
         !check.issue.trim() && !check.references.length) throw new Error(`U${index + 1}: thiếu quyết định hoặc chứng cứ.`);
     for (const ref of check.references) {
       const match = typeof ref === "string" ? /^([EX])([1-9]\d*)$/u.exec(ref) : null;
