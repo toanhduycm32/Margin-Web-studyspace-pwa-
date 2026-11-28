@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     const body = await readJsonBody<ChunkInput>(request, MAX_CHUNK_REQUEST_BYTES);
     if (!body) throw new AppError(400, "Invalid processing request.");
     // Leave time for an explicit failure response before Vercel's hard timeout.
-    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(240_000)]);
+    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(280_000)]);
     try { return Response.json(await processChunk(session, body, signal)); }
     catch (error) { logAiFailure("chunk", session.sub, body.operationId, error); throw error; }
   });

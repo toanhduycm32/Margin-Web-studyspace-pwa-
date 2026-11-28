@@ -1,7 +1,7 @@
 import { canonicalSummaryTarget, VIETNAMESE_STANDARD } from "./education";
 import type { ResponseType } from "./types";
 
-export const STUDY_RULE_VERSION = "2026-11-27-vietnamese-3";
+export const STUDY_RULE_VERSION = "2026-11-28-source-selection-2";
 
 export type StudyDomain = "general" | "medical" | "dental";
 
@@ -70,15 +70,17 @@ export const QUESTION_FAMILY_RULES: Record<typeof QUESTION_FAMILIES[number], str
   integrated_case: "Connect two or more supported clinical concepts in a short educational case without inventing a medically consequential premise.",
 };
 
-export function familyConstruction(family: string): string {
+export const ASSESSMENT_ITEM_RULES = `Độ khó: remember = nhận diện một dữ kiện; understand = giải thích/phân biệt một quan hệ; apply = áp dụng một quy tắc có điều kiện; analyze = kết hợp từ hai quan hệ được hỗ trợ. Không nâng độ khó bằng câu chữ rối, số liệu không cần thiết hay ngoại lệ ngoài nguồn.
+Khóa đáp án: kiểm tra từng lựa chọn dưới cùng điều kiện; một nhận định đúng nhưng ít liên quan không được gán sai. Nhiễu: đảo quan hệ, nhầm cơ chế, thiếu điều kiện, dùng nhầm tiêu chí hoặc lẫn nguyên nhân với hậu quả; phải có cơ sở giải thích rõ vì sao sai.
+Loại câu nếu thiếu dữ kiện phân biệt, có nhiều đáp án hợp lý ngoài khóa, lặp một mục tiêu bằng thay tên, hoặc cần kiến thức ngoài PDF. Giải thích phải nêu quan hệ được kiểm tra, áp dụng chứng cứ và sửa ngộ nhận của từng lựa chọn; không chỉ nhắc lại chữ đúng/sai.`;
+
+export function familyConstruction(family: string, includeCommon = true): string {
   const clinical = ["clinical_presentation", "diagnostic_reasoning", "investigation", "management", "contraindication", "integrated_case", "pharmacology", "complication"].includes(family);
   const relational = ["mechanism", "anatomical_relation", "cross_concept", "etiology", "material_property"].includes(family);
   return `${QUESTION_FAMILY_RULES[family as keyof typeof QUESTION_FAMILY_RULES]}
 Chứng cứ cần có: ${clinical ? "đối tượng, tình huống, phát hiện phân biệt và điều kiện có thể làm đổi quyết định; thiếu điều kiện quyết định thì đổi mục tiêu, không tự thêm" : relational ? "ít nhất hai thành phần và quan hệ có hướng giữa chúng, không chỉ cùng xuất hiện trong một đoạn" : "định nghĩa hoặc tiêu chí rõ, kèm trường hợp áp dụng hoặc giới hạn của nguồn"}.
 Cách dựng câu: ${clinical ? "ca ngắn chỉ giữ dữ kiện cần thiết; nêu rõ đang hỏi nhận diện, chẩn đoán phân biệt, ý nghĩa xét nghiệm hay nguyên tắc xử trí" : relational ? "hỏi quan hệ, nguyên nhân hoặc hệ quả cụ thể; có thể cho thay đổi một điều kiện rồi suy kết quả được nguồn hỗ trợ" : "đặt hai khái niệm gần nhau hoặc một ví dụ phân loại; tránh câu điền lại nguyên văn"}.
-Độ khó: remember = nhận diện một dữ kiện; understand = giải thích/phân biệt một quan hệ; apply = áp dụng một quy tắc có điều kiện; analyze = kết hợp từ hai quan hệ được hỗ trợ. Không nâng độ khó bằng câu chữ rối, số liệu không cần thiết hay ngoại lệ ngoài nguồn.
-Khóa đáp án: kiểm tra từng lựa chọn dưới cùng điều kiện; một nhận định đúng nhưng ít liên quan không được gán sai. Nhiễu: đảo quan hệ, nhầm cơ chế, thiếu điều kiện, dùng nhầm tiêu chí hoặc lẫn nguyên nhân với hậu quả; phải có cơ sở giải thích rõ vì sao sai.
-Loại câu nếu thiếu dữ kiện phân biệt, có nhiều đáp án hợp lý ngoài khóa, lặp một mục tiêu bằng thay tên, hoặc cần kiến thức ngoài PDF. Giải thích phải nêu quan hệ được kiểm tra, áp dụng chứng cứ và sửa ngộ nhận của từng lựa chọn; không chỉ nhắc lại chữ đúng/sai.`;
+${includeCommon ? ASSESSMENT_ITEM_RULES : ""}`;
 }
 
 export function responseTargets(count: number): ResponseType[] {

@@ -16,13 +16,13 @@ it("persists a real summary draft before yielding and reviews it on the next req
   const digest = "Phương pháp được áp dụng khi có đồng thời điều kiện A và B. Ngoại lệ C cần được loại trừ trước khi áp dụng phương pháp trong tình huống đã nêu.";
   const completion = (value: unknown) => Response.json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(value) } }] });
   const fetch = vi.fn().mockResolvedValueOnce(completion({ digest }))
-    .mockResolvedValueOnce(completion({ valid: true, issues: [] }));
+    .mockResolvedValueOnce(completion({ checks: [{ unit: 1, references: ["E1"], issue: "" }], omissions: [] }));
   vi.stubGlobal("fetch", fetch);
   const reserve = vi.fn(async () => {});
   const store = memoryStore();
   const models: string[] = [];
   const run = () => withGenerationCheckpoints(store, () => summarizeChunk(
-    "Điều kiện A và B cần đồng thời có; C là ngoại lệ.", 1, 1, "medical", "Điều kiện áp dụng", "heading",
+    digest, 1, 1, "medical", "Điều kiện áp dụng", "heading",
     40, reserve, undefined, [], (model) => models.push(model)));
   await expect(run()).rejects.toBeInstanceOf(GenerationContinuation);
   expect(fetch).toHaveBeenCalledTimes(1);

@@ -46,12 +46,13 @@ export function attachSourceExcerpts(items: unknown, passages: string[]): unknow
   if (!Array.isArray(items)) return items;
   return items.map((item, index) => {
     if (!item || typeof item !== "object" || item.evidence_id === undefined) return item;
-    const match = /^E([1-9]\d*)(?:\s*[-–]\s*E([1-9]\d*))?$/.exec(String(item.evidence_id).trim());
-    const first = match ? Number(match[1]) : 0;
-    const last = match ? Number(match[2] || match[1]) : 0;
-    if (!first || last < first || last > passages.length) {
+    const groups = String(item.evidence_id).trim().split(/\s*[;,]\s*/u);
+    const ranges = groups.map((group) => /^E([1-9]\d*)(?:\s*[-–]\s*E([1-9]\d*))?$/.exec(group));
+    if (!ranges.length || ranges.some((match) => !match || Number(match[1]) < 1 ||
+        Number(match[2] || match[1]) < Number(match[1]) || Number(match[2] || match[1]) > passages.length)) {
       throw new AssessmentValidationError(`Item ${index + 1} must choose an existing evidence_id from the supplied source.`);
     }
+    const first = Number(ranges[0]![1]);
     return { ...item, source_excerpt: passages[first - 1].slice(0, 500) };
   });
 }

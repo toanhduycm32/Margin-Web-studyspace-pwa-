@@ -77,5 +77,12 @@ export function objectiveBlueprint(plans: LearningPlan[]): Array<{
 export function isVietnameseProse(text: string): boolean {
   const words = text.normalize("NFC").toLocaleLowerCase("vi").match(/[\p{L}]+/gu) || [];
   const common = new Set(["của", "và", "là", "có", "không", "được", "trong", "các", "một", "với", "để", "khi", "do", "từ", "này", "răng", "bệnh", "tại", "những"]);
-  return words.length >= 5 && words.filter((word) => common.has(word)).length >= Math.min(5, Math.max(2, Math.floor(words.length / 25)));
+  const accented = words.filter((word) => /[ăâđêôơưáàảãạắằẳẵặấầẩẫậéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/u.test(word)).length;
+  // This is a language-presence check, not a fluency/medical-quality verdict.
+  // Valid clinical sentences can contain few of the common function words above.
+  // Vietnamese orthography provides an independent signal; a few quoted terms
+  // inside otherwise English prose must not be enough to pass.
+  return words.length >= 5 && accented / words.length >= 0.2 &&
+    (words.filter((word) => common.has(word)).length >= Math.min(5, Math.max(2, Math.floor(words.length / 25))) ||
+      accented >= 5 && accented / words.length >= 0.35);
 }

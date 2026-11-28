@@ -5,11 +5,13 @@ import { QUESTION_FAMILIES, STUDY_RULE_VERSION, classifyStudyDomain, responseTar
 import { retrieveEvidence } from "./evidence";
 import { signMap, verifyMap } from "./crypto";
 import { AppError } from "./errors";
-import { summarizeChunk, generateChunkQuestions, modelName, planLearning } from "./nvidia";
+import { summarizeChunk, modelName } from "./nvidia";
 import { checkedPdf, generationOperation, getDocumentRecord, getMap, saveArtifact, saveMap } from "./store";
 import { withAiAdmission } from "./ai-admission";
 import { checkpointEvidence, GenerationContinuation, withGenerationCheckpoints } from "./generation-checkpoints";
 import { driveCheckpointStore } from "./checkpoint-store";
+import { generateSectionQuestions } from "./section-assessment";
+import { sectionQuestionFormats } from "../shared/learning-workload";
 
 export type AiPrincipal = { sub: string; accessToken: string };
 
@@ -65,7 +67,7 @@ function validChunk(input: ChunkInput): void {
         (input.wordTarget || 0) < 20 || (input.wordTarget || 0) > 1800)) ||
       (input.kind === "quiz" && (!validQuizCount(input.requestedCount) ||
         !Array.isArray(input.plannedFormats) || !Array.isArray(input.plannedFamilies) ||
-        input.plannedFormats.length !== input.plannedFamilies.length || input.plannedFormats.length > 80 ||
+        input.plannedFormats.length > 4 || input.plannedFamilies.length > 0 ||
         input.plannedFormats.some((type) => !["single_best", "select_all", "select_n"].includes(type)) ||
         input.plannedFamilies.some((family) => !QUESTION_FAMILIES.includes(family as typeof QUESTION_FAMILIES[number]))))) {
     throw new AppError(400, "Invalid whole-PDF processing segment.");
@@ -84,44 +86,13 @@ function mapIdentity(input: ChunkInput, textHash: string): string {
     objectives: input.objectives, excluded: input.excluded, planSignature: input.learningPlan?.signature })).digest("hex").slice(0, 20);
 }
 
-export async function processLearningPlan(principal: AiPrincipal, input: ChunkInput, signal?: AbortSignal): Promise<SignedMap> {
-  validChunk({ ...input, kind: "quiz", requestedCount: 1, plannedFormats: [], plannedFamilies: [] });
-  await generationOperation(principal.sub, principal.accessToken, { id: input.operationId,
-    documentId: input.documentId, sourceMd5: input.sourceMd5, kind: "quiz" });
-  const file = await checkedPdf(principal.accessToken, input.documentId);
-  if (file.md5Checksum !== input.sourceMd5) throw new AppError(409, "PDF đã thay đổi. Mở lại tài liệu và thử lại.");
-  const textHash = createHash("sha256").update(input.text).digest("hex");
-  const planIdentity = createHash("sha256").update(JSON.stringify({ textHash, chunkCount: input.chunkCount,
-    pageCount: input.pageCount, startPage: input.startPage, endPage: input.endPage, section: input.section })).digest("hex").slice(0, 20);
-  const name = `plan-${STUDY_RULE_VERSION}-${input.operationId}-${input.chunkIndex}-${planIdentity}.json`;
-  const prior = await getMap(principal.accessToken, name);
-  if (prior) {
-    if (!verifyMap(prior.map, prior.signature) || prior.map.subject !== principal.sub || prior.map.operationId !== input.operationId ||
-        prior.map.ruleVersion !== STUDY_RULE_VERSION || prior.map.textHash !== textHash ||
-        prior.map.documentId !== input.documentId || prior.map.sourceMd5 !== input.sourceMd5 ||
-        prior.map.chunkCount !== input.chunkCount || prior.map.startPage !== input.startPage || prior.map.endPage !== input.endPage ||
-        JSON.stringify(prior.map.section) !== JSON.stringify(input.section)) throw new AppError(502, "Ma trận đã lưu không khớp phiên xử lý.");
-    return prior;
-  }
-  const plain = input.text.replace(/^Page \d+\n/gm, "").replace(/\[No extractable text\]/g, "").trim();
-  const planModels = new Set<string>();
-  const plan = input.excluded || input.section.role === "front_matter" || plain.length < 80
-    ? { objectives: [], limitations: [] }
-    : await withAiAdmission(principal, (reserve) => planLearning(input.text, input.section.title,
-      `s${input.chunkIndex}`, reserve, signal, (model) => planModels.add(model)), { operationId: input.operationId, phase: "assessment_plan" });
-  const map: MapRecord = { schema: 3, subject: principal.sub, kind: "quiz", documentId: input.documentId,
-    sourceMd5: input.sourceMd5, chunkIndex: input.chunkIndex, chunkCount: input.chunkCount,
-    startPage: input.startPage, endPage: input.endPage, pageCount: input.pageCount, requestedCount: 0,
-    emptyPages: input.emptyPages, textHash, section: input.section, ruleVersion: STUDY_RULE_VERSION,
-    operationId: input.operationId, objectives: plan.objectives, planningLimitations: plan.limitations,
-    ...(planModels.size ? { modelsUsed: [...planModels] } : {}) };
-  const signed = { map, signature: signMap(map) };
-  await saveMap(principal.accessToken, name, signed);
-  return signed;
-}
 
 export async function processChunk(principal: AiPrincipal, input: ChunkInput, signal?: AbortSignal): Promise<ChunkResult> {
   validChunk(input);
+  if (input.kind === "quiz" && (input.objectives || input.learningPlan || JSON.stringify(input.plannedFormats) !==
+      JSON.stringify(sectionQuestionFormats(input.text, input.excluded || input.section.role === "front_matter")))) {
+    throw new AppError(400, "Phân bổ câu hỏi không khớp nội dung phần nguồn. Mở lại tài liệu để tiếp tục.");
+  }
   const { accessToken, sub } = principal;
   await generationOperation(sub, accessToken, { id: input.operationId, documentId: input.documentId,
     sourceMd5: input.sourceMd5, kind: input.kind });
@@ -129,23 +100,6 @@ export async function processChunk(principal: AiPrincipal, input: ChunkInput, si
   const file = await checkedPdf(accessToken, input.documentId);
   if (file.md5Checksum !== input.sourceMd5) throw new AppError(409, "PDF changed during processing. Reopen it and start again.");
   const textHash = createHash("sha256").update(input.text).digest("hex");
-  if (input.objectives) {
-    const plan = input.learningPlan;
-    if (!plan || !verifyMap(plan.map, plan.signature) || plan.map.subject !== sub || plan.map.operationId !== input.operationId ||
-        plan.map.textHash !== textHash || plan.map.ruleVersion !== STUDY_RULE_VERSION ||
-        plan.map.documentId !== input.documentId || plan.map.sourceMd5 !== input.sourceMd5 ||
-        plan.map.chunkIndex !== input.chunkIndex || plan.map.startPage !== input.startPage || plan.map.endPage !== input.endPage ||
-        JSON.stringify(plan.map.section) !== JSON.stringify(input.section) ||
-        input.objectives.length !== input.plannedFormats?.length || input.objectives.some((objective, index) =>
-          !plan.map.objectives?.some((known) => (objective.id === known.id || objective.id === `${known.id}-application`) &&
-            objective.concept === known.concept && objective.objective === known.objective && objective.sourceExcerpt === known.sourceExcerpt &&
-            [known.family, known.secondaryFamily].includes(input.plannedFamilies![index])))) {
-      throw new AppError(400, "Ma trận trắc nghiệm không khớp nguồn hoặc phiên xử lý.");
-    }
-    if (new Set(input.objectives.map((objective) => objective.id)).size !== input.objectives.length) {
-      throw new AppError(400, "Ma trận có mục tiêu trùng lặp.");
-    }
-  }
   const identity = mapIdentity(input, textHash);
   const name = `map-v3-${input.kind}-${input.documentId}-${input.sourceMd5}-${input.requestedCount}-${input.chunkIndex}-${identity}.json`;
   const previous = await getMap(accessToken, name);
@@ -199,54 +153,11 @@ export async function processChunk(principal: AiPrincipal, input: ChunkInput, si
         { operationId: input.operationId, phase: "summary_segment" });
         for (const { title, year, url, kind, reviewedAt } of evidence) references.set(url, { title, year, url, kind, reviewedAt });
       } else if (input.plannedFormats!.length) {
-        const result = await withAiAdmission(principal, async (reserve) => {
-          const questions: NonNullable<MapRecord["questions"]> = [];
-          let generatedBatches = 0;
-          for (let offset = 0; offset < input.plannedFormats!.length; offset += 2) {
-            if (signal?.aborted) throw new AppError(499, "Processing stopped. Retry to reuse completed work.");
-            const formats = input.plannedFormats!.slice(offset, offset + 2);
-            const families = input.plannedFamilies!.slice(offset, offset + 2);
-            const batchName = name.replace(/\.json$/, `-batch-${offset}.json`);
-            const saved = await getMap(accessToken, batchName);
-            if (saved) {
-              if (!verifyMap(saved.map, saved.signature) || saved.map.schema !== 3 || saved.map.subject !== sub ||
-                  saved.map.ruleVersion !== STUDY_RULE_VERSION || saved.map.textHash !== textHash ||
-                  saved.map.kind !== "quiz" || (saved.map.evidenceMode || "pdf") !== (input.evidenceMode || "pdf") ||
-                  saved.map.documentId !== input.documentId || saved.map.sourceMd5 !== input.sourceMd5 ||
-                  saved.map.startPage !== input.startPage || saved.map.endPage !== input.endPage ||
-                  JSON.stringify(saved.map.section) !== JSON.stringify(input.section) ||
-                  JSON.stringify(saved.map.plannedFormats) !== JSON.stringify(formats) ||
-                  JSON.stringify(saved.map.plannedFamilies) !== JSON.stringify(families) ||
-                  saved.map.questions?.length !== formats.length) {
-                throw new AppError(502, "Saved assessment batch failed integrity validation.");
-              }
-              questions.push(...saved.map.questions!);
-              for (const model of saved.map.modelsUsed || []) modelsUsed.add(model);
-              for (const reference of saved.map.evidenceReferences || []) references.set(reference.url, reference);
-              continue;
-            }
-            // A new HTTP request resumes from these signed Drive checkpoints. Never put
-            // two full generation/review/repair workflows in one serverless invocation.
-            if (generatedBatches >= 1) return { pending: true as const,
-              completedQuestions: questions.length, totalQuestions: input.plannedFormats!.length };
-            const evidence = await evidenceForGeneration();
-            const batchModels = new Set<string>();
-            const generated = await generateChunkQuestions(input.text, formats, families,
-              input.startPage, input.endPage, input.section.title, reserve, signal, evidence,
-              (model) => batchModels.add(model), input.objectives?.slice(offset, offset + 2),
-              questions.map((question) => question.question));
-            const batchMap: MapRecord = { ...map, plannedFormats: formats, plannedFamilies: families, questions: generated,
-              modelsUsed: [...batchModels], evidenceReferences: evidence.map(({ title, year, url, kind, reviewedAt }) => ({ title, year, url, kind, reviewedAt })) };
-            await saveMap(accessToken, batchName, { map: batchMap, signature: signMap(batchMap) });
-            for (const model of batchModels) modelsUsed.add(model);
-            for (const reference of batchMap.evidenceReferences!) references.set(reference.url, reference);
-            questions.push(...generated);
-            generatedBatches++;
-          }
-          return questions.map((question, index) => ({ ...question, id: `${input.startPage}-${input.endPage}-${index + 1}` }));
-        }, { operationId: input.operationId, phase: "quiz_segment" });
-        if (!Array.isArray(result)) return result;
-        map.questions = result;
+        const evidence = await evidenceForGeneration();
+        map.questions = await withAiAdmission(principal, (reserve) => generateSectionQuestions(input.text,
+          input.plannedFormats!, input.startPage, input.endPage, input.section.title, reserve, signal, evidence,
+          (model) => modelsUsed.add(model)), { operationId: input.operationId, phase: "quiz_section" });
+        for (const { title, year, url, kind, reviewedAt } of evidence) references.set(url, { title, year, url, kind, reviewedAt });
       } else map.questions = [];
       if (signal?.aborted) throw new AppError(499, "Processing stopped. Retry to reuse completed work.");
       if (modelsUsed.size) map.modelsUsed = [...modelsUsed];

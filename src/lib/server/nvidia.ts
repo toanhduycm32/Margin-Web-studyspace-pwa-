@@ -2,17 +2,18 @@ import { AppError } from "./errors";
 import { AssessmentValidationError, originalSourceExcerpt, validateQuestionsV2 } from "@/lib/shared/quiz";
 import type { LearningObjective, LearningPlan, QuizQuestionV2, ResponseType } from "@/lib/shared/types";
 import { isVietnameseProse, relevantKnowledgeRules, VIETNAMESE_STANDARD } from "@/lib/shared/education";
-import { QUESTION_FAMILIES, familyConstruction, SUMMARY_PROFILES, classifyStudyDomain, summaryInstruction, type SummaryProfile } from "@/lib/shared/study-rules";
-import { assessmentContext, CALIBRATION_EXAMPLES, summaryContext } from "./ai-context";
+import { QUESTION_FAMILIES, familyConstruction, ASSESSMENT_ITEM_RULES, classifyStudyDomain, type SummaryProfile } from "@/lib/shared/study-rules";
+import { assessmentContext, CALIBRATION_EXAMPLES } from "./ai-context";
 import { evidencePrompt, type EvidenceSource } from "./evidence";
-import { checkpointInference, checkpointProviderUnavailable, markCheckpointProviderUnavailable,
-  GenerationContinuation } from "./generation-checkpoints";
+import { checkpointInference, GenerationContinuation } from "./generation-checkpoints";
 import { attachSourceExcerpts, focusedQuestionSource, indexedEvidence, summaryPassages } from "./generation-input";
+import { summaryDraftPrompt, summaryReviewPrompt, summaryOutputSchema, summaryReviewSchema, summaryWithoutPageLabels, validateSummaryReview, sourcePreservingIssue, summaryReviewUnits } from "./summary-review";
+import { summarySelectionPrompt, summarySelectionSchema, renderSummarySelection } from "./summary-selection";
 
 const endpoint = "https://integrate.api.nvidia.com/v1/chat/completions";
 const mistral = "mistralai/mistral-large-4-1t-a52b";
+const minimax = "minimaxai/minimax-m3.1-flash";
 const legacy = "nvidia/nemotron-3.5-lightning-30b-a3b";
-let mistralUnavailableUntil = 0;
 class ProviderError extends AppError {}
 
 function checkCancellation(signal?: AbortSignal): void {
@@ -23,7 +24,15 @@ function checkCancellation(signal?: AbortSignal): void {
 
 export function modelName(): string {
   // An old deployed NVIDIA_MODEL value must not silently keep the prior model primary.
-  return !process.env.NVIDIA_MODEL || process.env.NVIDIA_MODEL === legacy ? mistral : process.env.NVIDIA_MODEL;
+  return !process.env.NVIDIA_MODEL || process.env.NVIDIA_MODEL === legacy ? minimax : process.env.NVIDIA_MODEL;
+}
+
+// This is an explicit task-language policy, never a retry/failure fallback.
+// MiniMax handles Vietnamese sources; Mistral handles translation from other
+// source languages. Both generation and review keep the same selected model.
+export function modelForSource(source: string): string {
+  const primary = modelName();
+  return primary === minimax && !isVietnameseProse(source) ? mistral : primary;
 }
 
 export function inferenceControls(model: string, reasoningBudget: number): Record<string, unknown> {
@@ -32,6 +41,12 @@ export function inferenceControls(model: string, reasoningBudget: number): Recor
   if (model === "mistralai/mistral-large-4-1t-a52b") return {
     reasoning_effort: reasoningBudget > 4096 ? "high" : reasoningBudget > 1024 ? "medium" : "low",
   };
+  if (model === "z-ai/glm-5.3-flash") return { reasoning_effort: reasoningBudget > 1024 ? "high" : "low" };
+  // The catalog form omits this control; the model card and NIM recipe document
+  // low/high/max effort. Use an explicit level, not the expensive default.
+  if (model === "minimaxai/minimax-m3.1-flash") return {
+    reasoning_effort: reasoningBudget > 4096 ? "high" : "low", temperature: 1, top_p: 0.95,
+  };
   if (model.startsWith("nvidia/nemotron-")) return reasoningBudget > 0
     ? { chat_template_kwargs: { enable_thinking: true }, reasoning_budget: reasoningBudget }
     : { chat_template_kwargs: { enable_thinking: false } };
@@ -39,7 +54,7 @@ export function inferenceControls(model: string, reasoningBudget: number): Recor
 }
 
 async function requestModel(model: string, prompt: string, maxTokens: number, reasoningBudget: number,
-  reserveCall: () => Promise<void>, signal?: AbortSignal, timeoutMs = 70_000, structured = true): Promise<string> {
+  reserveCall: () => Promise<void>, signal?: AbortSignal, timeoutMs = 260_000, structured = true, schema?: Record<string, unknown>): Promise<string> {
   const key = process.env.NVIDIA_API_KEY;
   if (!key) throw new AppError(503, "NVIDIA_API_KEY is not configured.");
   const controls = inferenceControls(model, reasoningBudget);
@@ -47,6 +62,9 @@ async function requestModel(model: string, prompt: string, maxTokens: number, re
   await reserveCall();
   checkCancellation(signal);
   let response: Response;
+  const started = Date.now();
+  let outcome = "failed";
+  let usage: unknown;
   try {
     response = await fetch(endpoint, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
@@ -55,6 +73,7 @@ async function requestModel(model: string, prompt: string, maxTokens: number, re
         { role: "user", content: prompt },
       ], temperature: 0.25, max_tokens: maxTokens, stream: false,
       ...controls,
+      ...(structured && schema && model === mistral ? { response_format: { type: "json_schema", json_schema: { name: "learning_output", strict: true, schema } } } : {}),
       ...(structured && model.startsWith("nvidia/nemotron-") ? { response_format: { type: "json_object" } } : {}) }),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs), cache: "no-store",
     });
@@ -63,12 +82,15 @@ async function requestModel(model: string, prompt: string, maxTokens: number, re
     if (response.status === 402) throw new AppError(503, "NVIDIA API credits are insufficient.");
     if (response.status === 202) throw new ProviderError(502, "NVIDIA accepted the request without a completed result. Retry later.");
     if (!response.ok) throw new ProviderError(502, `NVIDIA request failed (${response.status}).`);
-    const data = await response.json() as { choices?: Array<{ finish_reason?: string; message?: { content?: string } }> };
+    const data = await response.json() as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+      choices?: Array<{ finish_reason?: string; message?: { content?: string } }> };
+    usage = data.usage && { input: data.usage.prompt_tokens, output: data.usage.completion_tokens, total: data.usage.total_tokens };
     const choice = data.choices?.[0];
     if (choice?.finish_reason === "length") throw new ProviderError(502, "NVIDIA output was incomplete. Retry or use a shorter PDF.");
     if (choice?.finish_reason && choice.finish_reason !== "stop") throw new ProviderError(502, "NVIDIA did not complete the response.");
     const content = choice?.message?.content?.trim();
     if (!content) throw new ProviderError(502, "NVIDIA returned no final answer.");
+    outcome = "completed";
     return content;
   } catch (error) {
     checkCancellation(signal);
@@ -77,52 +99,22 @@ async function requestModel(model: string, prompt: string, maxTokens: number, re
       throw new ProviderError(504, "NVIDIA took too long. Retry to reuse completed sections.");
     }
     throw new ProviderError(502, "NVIDIA returned an unreadable response or could not be reached. Retry shortly.");
+  } finally {
+    console.info("ai_provider", { model, outcome, elapsedMs: Date.now() - started, usage });
   }
 }
 
-async function requestWithFallback(prompt: string, maxTokens: number, reasoningBudget: number,
+export async function callNvidia(prompt: string, maxTokens: number, reasoningBudget: number,
   reserveCall: () => Promise<void>, signal?: AbortSignal, onModelUsed?: (model: string) => void,
-  structured = true): Promise<string> {
-  const primary = modelName();
-  const fallback = process.env.NVIDIA_FALLBACK_MODEL || legacy;
-  const useFallback = primary === mistral && (Date.now() < mistralUnavailableUntil || await checkpointProviderUnavailable(primary));
-  if (!useFallback) {
-    const started = Date.now();
-    try {
-      const content = await requestModel(primary, prompt, maxTokens, reasoningBudget, reserveCall, signal,
-        primary === mistral ? 150_000 : 70_000, structured);
-      onModelUsed?.(primary);
-      return content;
-    } catch (error) {
-      if (signal?.aborted || primary !== mistral || fallback === primary || !(error instanceof ProviderError)) throw error;
-      console.warn("ai_provider_fallback", { model: primary, status: error.status, reason: error.message });
-      mistralUnavailableUntil = Date.now() + 5 * 60_000;
-      await markCheckpointProviderUnavailable(primary);
-      // A slow primary attempt must not spend another full fallback/review budget
-      // inside the same serverless request. The reader resumes the operation; the
-      // next request uses the circuit's fallback and completed maps remain intact.
-      if (Date.now() - started > 110_000) throw new AppError(503,
-        "Mô hình phản hồi chậm. Thử lại để tiếp tục phần đã lưu.");
-    }
-  }
-  const content = await requestModel(fallback, prompt, maxTokens, reasoningBudget, reserveCall, signal, 70_000, structured);
-  onModelUsed?.(fallback);
-  return content;
-}
-
-async function callNvidia(prompt: string, maxTokens: number, reasoningBudget: number,
-  reserveCall: () => Promise<void>, signal?: AbortSignal, onModelUsed?: (model: string) => void,
-  structured = true): Promise<string> {
-  return checkpointInference({ prompt, maxTokens, reasoningBudget, structured, primary: modelName(),
-    fallback: process.env.NVIDIA_FALLBACK_MODEL || legacy }, async () => {
-    let model: string | undefined;
-    const content = await requestWithFallback(prompt, maxTokens, reasoningBudget, reserveCall, signal,
-      (name) => { model = name; }, structured);
-    return { content, model };
+  structured = true, schema?: Record<string, unknown>, selectedModel = modelName()): Promise<string> {
+  return checkpointInference({ prompt, maxTokens, reasoningBudget, structured, primary: selectedModel,
+    fallback: "disabled-unqualified", schema }, async () => {
+    const content = await requestModel(selectedModel, prompt, maxTokens, reasoningBudget, reserveCall, signal, 260_000, structured, schema);
+    return { content, model: selectedModel };
   }, onModelUsed);
 }
 
-function parseObject(raw: string): Record<string, unknown> {
+export function parseObject(raw: string): Record<string, unknown> {
   const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
   for (const candidate of [cleaned, cleaned.slice(cleaned.indexOf("{"), cleaned.lastIndexOf("}") + 1)]) {
     try {
@@ -188,53 +180,76 @@ export async function planLearning(source: string, sectionTitle: string, prefix:
   throw new AppError(502, "Chưa lập được ma trận học tập.");
 }
 
+export async function reviewSummary(source: string, digest: string, reserveCall: () => Promise<void>,
+  signal?: AbortSignal, evidence: EvidenceSource[] = [], onModelUsed?: (model: string) => void) {
+  const prompt = summaryReviewPrompt(source, digest, evidence);
+  let feedback = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    // Network/quota failures leave the same draft/review request resumable.
+    const translated = !isVietnameseProse(source);
+    const raw = await callNvidia(prompt + feedback, translated ? Math.min(4500, 1800 + summaryReviewUnits(digest).length * 100) : 4500, 1024, reserveCall, signal, onModelUsed, true, summaryReviewSchema, modelForSource(source));
+    try { return validateSummaryReview(parseObject(raw), source, digest, evidence); }
+    catch (error) {
+      if (attempt) throw new AppError(422,
+        "Chưa nhận được kiểm tra đầy đủ cho bản tóm tắt. Bản hiện hành vẫn được giữ.", "RESTART_GENERATION");
+      feedback = `\nKết quả kiểm tra trước sai cấu trúc: ${error instanceof Error ? error.message : "thiếu checks"}. Trả lại kiểm tra đầy đủ theo cấu trúc yêu cầu, không viết lại bản tóm tắt.`;
+    }
+  }
+  throw new AppError(422, "Chưa nhận được kiểm tra đầy đủ.", "RESTART_GENERATION");
+}
+
 export async function summarizeChunk(source: string, start: number, end: number, profile: SummaryProfile,
   sectionTitle: string, sectionSource: string, wordTarget: number, reserveCall: () => Promise<void>,
   signal?: AbortSignal, evidence: EvidenceSource[] = [], onModelUsed?: (model: string) => void): Promise<string> {
-  const parts = summaryPassages(source, start, end);
-  if (parts.length > 1) {
-    const summaries: string[] = [];
-    for (const part of parts) {
-      summaries.push(await summarizeChunk(part.text, part.start, part.end, profile, sectionTitle, sectionSource,
-        Math.max(20, Math.round(wordTarget * part.text.length / source.length)), reserveCall, signal, evidence, onModelUsed));
-    }
-    return summaries.join("\n\n");
-  }
-  const rules = SUMMARY_PROFILES.medical;
-  const domain = classifyStudyDomain(`${sectionTitle} ${source}`);
-  const prompt = `Summarize PDF pages ${start}–${end} as a contribution to the major section "${sectionTitle}". The heading is ${sectionSource === "inferred" ? "an inferred division, not an original PDF heading" : "identified from the PDF outline or heading text"}. Profile: ${rules.label}. ${summaryInstruction(profile)} ${summaryContext(domain, profile)} ${relevantKnowledgeRules(source)} Giữ các đề mục con thật bằng tiêu đề ###; không dùng số đoạn xử lý làm tiêu đề. Không tóm tắt lại mục lục, lời giới thiệu hay câu tự lượng giá. Target approximately ${wordTarget} words for these pages, but use fewer when evidence is thin. Preserve distinct concepts and their relationships, formulas only when supported, assumptions and limits. Write coherent prose or compact revision notes as the profile directs. Do not invent facts or quote visual content that text extraction cannot read. ${evidence.length ? `External verification is integrated when relevant. ${evidencePrompt(evidence)} Summarize the PDF first. If an abstract directly supports a material qualification or conflict, append a short "Đối chiếu nguồn ngoài" with its exact URL; do not silently change the PDF's teaching or make unsupported clinical recommendations.` : "Không lấy được nguồn ngoài phù hợp; chỉ trình bày kiến thức của PDF, không tuyên bố đã xác minh y khoa."} Return only JSON: {"digest":"..."}.\n\n<untrusted_pdf_text>\n${source}\n</untrusted_pdf_text>`;
+  const selectingSource = isVietnameseProse(source) && !evidence.length;
+  const prompt = selectingSource ? summarySelectionPrompt(source, sectionTitle, wordTarget)
+    : summaryDraftPrompt(source, start, end, sectionTitle, sectionSource, wordTarget, evidence);
+  const outputBudget = selectingSource ? 10000 : Math.min(8000, Math.max(3000, 1500 + wordTarget * 4));
   let feedback = "";
   for (let attempt = 0; attempt < 2; attempt++) {
-    const raw = await callNvidia(prompt + `\nĐây là bản TÓM TẮT tự diễn đạt, không phải bản chép lại hay sửa OCR toàn văn. Gộp chi tiết nhỏ theo ý chính; vẫn giữ các điều kiện làm đổi kết luận. Viết tiếng Việt có nghĩa và đúng thuật ngữ; không biến chữ bị ngắt trong nguồn thành từ mới vô nghĩa. Không chép mục tiêu học tập, tên tác giả hoặc số trang. Giữ các đề mục chính bằng ### và nhóm đề mục quá nhỏ. Trả JSON ví dụ {"digest":"### Đề mục từ nguồn\\nĐoạn giải thích cô đọng...\\n\\n### Đề mục tiếp theo\\n..."}. Mốc độ dài khoảng ${wordTarget}, tối đa ${Math.ceil(wordTarget * 2.4)} đơn vị cách nhau bởi khoảng trắng: "cấu tạo răng" = 3 đơn vị. Không bỏ điều kiện chỉ để rút ngắn.` + feedback,
-      10000, attempt ? 2048 : 0, reserveCall, signal, onModelUsed);
+    const raw = await callNvidia(prompt + feedback,
+      outputBudget, attempt ? 2048 : 0, reserveCall, signal, onModelUsed, true, selectingSource ? summarySelectionSchema : summaryOutputSchema, modelForSource(source));
     try {
       const parsed = parseObject(raw);
+      // Accept a verbatim digest as well, but only behind the strict source guard.
+      // The usual compact contract delegates exact span rendering to the app.
+      const selected = selectingSource && Array.isArray(parsed.blocks);
+      if (selected) parsed.digest = renderSummarySelection(parsed, source);
+      if (typeof parsed.digest === "string") parsed.digest = summaryWithoutPageLabels(parsed.digest);
       const words = typeof parsed.digest === "string" ? parsed.digest.trim().split(/\s+/u).length : 0;
-      if (typeof parsed.digest !== "string" || words < Math.max(20, Math.ceil(wordTarget * 0.45)) ||
-          words > Math.max(150, Math.ceil(wordTarget * 2.4)) || parsed.digest.length > 24_000 ||
+      const sentences = typeof parsed.digest === "string" ? parsed.digest.split(/(?<=[.!?])\s*|\n+/u)
+        .map((part) => part.trim().normalize("NFC")).filter((part) => part.length >= 40) : [];
+      const repetition = sentences.some((sentence) => sentences.filter((part) => part === sentence).length >= 3);
+      if (typeof parsed.digest !== "string" || words < 20 || parsed.digest.length > 24_000 ||
+          repetition ||
           (profile === "medical" && wordTarget > 80 && !/^#{2,4}\s+\S/m.test(parsed.digest)) ||
           profile === "medical" && !isVietnameseProse(parsed.digest)) {
         console.warn("summary_validation", { attempt: attempt + 1, words, target: wordTarget,
           characters: typeof parsed.digest === "string" ? parsed.digest.length : 0 });
-        feedback = `\nBản trước có ${words} đơn vị cách nhau bởi khoảng trắng và chưa đạt yêu cầu. Viết lại cô đọng khoảng ${wordTarget}, tối đa ${Math.max(150, Math.ceil(wordTarget * 2.4))} đơn vị; dùng tiêu đề ### và đoạn giải thích tiếng Việt. Không sao chép cả đoạn nguồn. Trả JSON digest hoàn chỉnh, tối đa 24000 ký tự; giữ các quan hệ và điều kiện chính.`;
+        feedback = `\nBản trước chưa đạt cấu trúc hoặc lặp lại cùng câu nhiều lần. Viết lại cô đọng, bỏ câu lặp; cần ít nhất 20 đơn vị tách bởi khoảng trắng, tiêu đề ### và tiếng Việt; giới hạn lưu trữ 24000 ký tự. Trả JSON ${selectingSource ? "blocks" : "digest"} hoàn chỉnh, giữ các quan hệ và điều kiện chính.`;
         throw new AppError(502, "NVIDIA returned an unusable digest.");
       }
+      const custodyIssue = selectingSource && !selected ? sourcePreservingIssue(source, parsed.digest) : null;
+      if (custodyIssue) {
+        feedback = `\nBản trước vi phạm giữ nguyên nguồn. ${custodyIssue} Trả lại toàn bộ digest chọn lọc nguyên văn, không diễn giải.`;
+        throw new AppError(502, "Bản tóm tắt đã đổi từ ngữ của nguồn tiếng Việt.");
+      }
       if (profile === "medical") {
-        const audit = parseObject(await callNvidia(`Kiểm tra bản tóm tắt tiếng Việt với phần nguồn đã cho. Đây là một phần của toàn tài liệu, không đòi nó bao phủ các trang khác. Chấp nhận việc rút gọn chi tiết nhỏ; từ chối nếu bỏ một đề mục kiến thức quan trọng, đảo quan hệ, thêm khẳng định không có nguồn, sai thuật ngữ/số/đơn vị, bỏ điều kiện làm đổi kết luận hoặc trình bày nguồn ngoài như nội dung PDF. Không xem hình ảnh không trích xuất là dữ kiện đã đọc. ${relevantKnowledgeRules(source)} ${evidencePrompt(evidence)} Trả JSON ngắn {"valid":true,"issues":[]} hoặc {"valid":false,"issues":["tối đa bốn lỗi cụ thể cần sửa"]}. Không viết lại toàn bản tóm tắt.\n<untrusted_pdf_text>\n${source}\n</untrusted_pdf_text>\n<summary>\n${parsed.digest}\n</summary>`,
-          4500, 1024, reserveCall, signal, onModelUsed));
+        const audit = await reviewSummary(source, parsed.digest, reserveCall, signal, evidence, onModelUsed);
         if (audit.valid !== true || !Array.isArray(audit.issues) || audit.issues.length) {
-          feedback = `\nBản trước chưa đạt kiểm tra. Sửa các vấn đề: ${JSON.stringify(audit.issues || []).slice(0, 2000)}. Giữ độ dài phù hợp; trả JSON digest hoàn chỉnh.`;
+          feedback = `\nBản trước chưa đạt kiểm tra. Sửa các vấn đề: ${JSON.stringify(audit.issues || []).slice(0, 2000)}. ${selectingSource ? "Chọn lại các đoạn nguồn để giữ đầy đủ điều kiện; trả JSON blocks hoàn chỉnh." : "Giữ độ dài phù hợp; trả JSON digest hoàn chỉnh."}`;
           throw new AppError(502, "Bản tóm tắt chưa đạt kiểm tra nội dung hoặc điều kiện của nguồn. Thử lại để tiếp tục phần đã lưu.");
         }
       }
       return parsed.digest.trim();
     } catch (error) {
       if (error instanceof GenerationContinuation) throw error;
+      // A failed reviewer transport/quota is not evidence against the saved draft.
+      // Resume the same review later; never spend a new generation call here.
+      if (error instanceof ProviderError || error instanceof AppError && error.status !== 502) throw error;
+      if (!(error instanceof AppError)) feedback = `\nSửa lỗi chọn nguồn: ${error instanceof Error ? error.message : "sai cấu trúc"}. Trả đầy đủ JSON blocks với số dòng nguồn hợp lệ.`;
       if (attempt === 1) {
-        if (error instanceof AppError && error.status === 502 && !(error instanceof ProviderError)) {
-          throw new AppError(502, "Bản tóm tắt chưa đạt kiểm tra. Thử lại để viết lại phần này; các phần đã duyệt vẫn được giữ.", "RESTART_SECTION");
-        }
-        throw error;
+        throw new AppError(422, "Bản tóm tắt vẫn chưa đạt sau khi sửa. Bản hiện hành vẫn được giữ.", "RESTART_GENERATION");
       }
     }
   }
@@ -246,10 +261,10 @@ export async function generateChunkQuestions(source: string, formats: ResponseTy
   signal?: AbortSignal, evidence: EvidenceSource[] = [], onModelUsed?: (model: string) => void,
   objectives?: LearningObjective[], priorObjectives: string[] = []): Promise<QuizQuestionV2[]> {
   const evidenceLines = indexedEvidence(focusedQuestionSource(source, objectives));
-  const plan = formats.map((format, index) => `${index + 1}. ${format} / ${families[index]}: ${familyConstruction(families[index])} ${objectives?.[index] ? `Mục tiêu bắt buộc: ${objectives[index].concept}: ${objectives[index].objective}. Chứng cứ neo: ${objectives[index].sourceExcerpt}` : ""}`).join("\n");
+  const plan = formats.map((format, index) => `${index + 1}. ${format} / ${families[index]}: ${familyConstruction(families[index], false)} ${objectives?.[index] ? `Mục tiêu bắt buộc: ${objectives[index].concept}: ${objectives[index].objective}. Chứng cứ neo: ${objectives[index].sourceExcerpt}` : ""}`).join("\n");
   const domain = classifyStudyDomain(`${sectionTitle} ${source}`);
   const outputTemplate = JSON.stringify({ questions: formats.map((format, index) => questionSchema(format, families[index])) });
-  const prompt = `Create exactly ${formats.length} distinct, source-grounded assessment items from PDF pages ${start}–${end} in section "${sectionTitle}". ${assessmentContext(domain)}\n${relevantKnowledgeRules(source)}\nCác câu đã tạo trong cùng phần (không lặp mục tiêu bằng cách diễn đạt lại): ${JSON.stringify(priorObjectives)}\n${CALIBRATION_EXAMPLES}\nFollow this ordered blueprint exactly:\n${plan}\n\nResponse rules: single_best has exactly one defensible correct answer and every other option must be false under the stem's conditions; select_all has at least two correct and one incorrect option; select_n has at least two correct and one incorrect option and selection_count equals the exact number of correct options. Use 4–6 comparable options, vary correct positions and counts, and avoid all/none shortcuts. Every option must be independently true or false under the stem's stated conditions. A true but less relevant statement is NOT an acceptable incorrect option. For a single-best item, test each distractor against the source: if it is true, rewrite the distractor or narrow the stem until it becomes clearly false. Build plausible wrong options from meaningful misconceptions, reversed relations, missing conditions or calculation errors. Vary objective and reasoning path; avoid trivia, trick wording and artificial difficulty. Use source terminology. For each option, explain why it is right or wrong under the stated conditions. The overall explanation must teach the concept, not repeat the answer. Application scenarios may be constructed only from source-supported rules. Each item needs an evidence_id (for example E12) selected from the supplied source lines. The application copies that original line unchanged; the anchor is not sole proof of semantic support. Never rewrite or repair the original quote. Set cognitive_demand to remember, understand, apply or analyze; difficulty to foundational, intermediate or advanced. Before returning, check every option, all necessary assumptions, answer-set completeness and source support. Return one JSON object using this complete ordered template: ${outputTemplate}. Fill every one of its ${formats.length} question objects; do not return a single example, string entries, or fields outside those objects. Keep explanations concise (one or two sentences per option, two to four sentences overall) while preserving necessary conditions. Indices are zero based.\n\n<untrusted_pdf_text>\n${evidenceLines.text}\n</untrusted_pdf_text>\n\nOutput checklist: every item MUST contain correct_option_ids and one option_explanations entry per option. For single_best and select_all, selection_count MUST be null. For select_n, selection_count MUST equal the answer key size. Select an existing evidence_id; do not transcribe source_excerpt. The single_best wrong options must each be false, not just irrelevant.`;
+  const prompt = `Create exactly ${formats.length} distinct, source-grounded assessment items from PDF pages ${start}–${end} in section "${sectionTitle}". ${assessmentContext(domain)}\n${relevantKnowledgeRules(source)}\nCác câu đã tạo trong cùng phần (không lặp mục tiêu bằng cách diễn đạt lại): ${JSON.stringify(priorObjectives)}\n${CALIBRATION_EXAMPLES}\n${ASSESSMENT_ITEM_RULES}\nFollow this ordered blueprint exactly:\n${plan}\n\nResponse rules: single_best has exactly one defensible correct answer and every other option must be false under the stem's conditions; select_all has at least two correct and one incorrect option; select_n has at least two correct and one incorrect option and selection_count equals the exact number of correct options. Use 4–6 comparable options, vary correct positions and counts, and avoid all/none shortcuts. Every option must be independently true or false under the stem's stated conditions. A true but less relevant statement is NOT an acceptable incorrect option. For a single-best item, test each distractor against the source: if it is true, rewrite the distractor or narrow the stem until it becomes clearly false. Build plausible wrong options from meaningful misconceptions, reversed relations, missing conditions or calculation errors. Vary objective and reasoning path; avoid trivia, trick wording and artificial difficulty. Use source terminology. For each option, explain why it is right or wrong under the stated conditions. The overall explanation must teach the concept, not repeat the answer. Application scenarios may be constructed only from source-supported rules. Diagnostic_reasoning and integrated_case items must require an inference from discriminating findings or a justified limitation; merely naming a disease and asking for its signs is recall. Do not invent case findings to manufacture the inference. Each item needs an evidence_id (for example E12) selected from the supplied source lines. The application copies that original line unchanged; the anchor is not sole proof of semantic support. Never rewrite or repair the original quote. Set cognitive_demand to remember, understand, apply or analyze; difficulty to foundational, intermediate or advanced. Before returning, check every option, all necessary assumptions, answer-set completeness and source support. Return one JSON object using this complete ordered template: ${outputTemplate}. Fill every one of its ${formats.length} question objects; do not return a single example, string entries, or fields outside those objects. Keep explanations concise (one or two sentences per option, two to four sentences overall) while preserving necessary conditions. Indices are zero based.\n\n<untrusted_pdf_text>\n${evidenceLines.text}\n</untrusted_pdf_text>\n\nOutput checklist: every item MUST contain correct_option_ids and one option_explanations entry per option. For single_best and select_all, selection_count MUST be null. For select_n, selection_count MUST equal the answer key size. Select an existing evidence_id; do not transcribe source_excerpt. The single_best wrong options must each be false, not just irrelevant.`;
   let feedback = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     const raw = await callNvidia(prompt + feedback, 10000, 1024, reserveCall, signal, onModelUsed);
@@ -264,7 +279,7 @@ export async function generateChunkQuestions(source: string, formats: ResponseTy
         }
         questions[index].objectiveId = objectives?.[index]?.id;
       }
-      const auditPrompt = () => `Return a compact JSON decision about these ${questions.length} assessment items. Each correctOptionIds value is a ZERO-BASED index into that item's options. Check Vietnamese language in every option and explanation, objective fidelity, micro-concept repetition and source conditions. Assigned objectives and families: ${JSON.stringify(objectives || [])}. Prior questions: ${JSON.stringify(priorObjectives)}. Reject an item if any selected option is unsupported, any unselected option is true under the stem, the source does not support its conditions, or a distractor introduces an unsupported clinical drug, dose, population, action or threshold. ${domain === "general" ? "" : "Check clinical population, indications, contraindications, time course, units and exceptions."} ${evidence.length ? `Use these abstracts only to identify a direct conflict, never as sole proof: ${evidencePrompt(evidence)}` : "Use only the PDF."} Output exactly {"valid":true,"issues":[]} or {"valid":false,"issues":[{"index":1,"reason":"one short reason"}]}. Issue index is ONE-BASED QUESTION number, not an option index. Include at most one issue per question. No analysis or per-option list.\n<untrusted_pdf_text>\n${source}\n</untrusted_pdf_text>\n<items_to_audit>\n${JSON.stringify(questions)}\n</items_to_audit>`;
+      const auditPrompt = () => `Return a compact JSON decision about these ${questions.length} assessment items. Each correctOptionIds value is a ZERO-BASED index into that item's options. Check Vietnamese language in every option and explanation, objective fidelity, micro-concept repetition and source conditions. Assigned objectives and families: ${JSON.stringify(objectives || [])}. For diagnostic_reasoning and integrated_case, reject mere recall of a named disease's signs or an empty "a patient presents" wrapper: the item must require a source-supported inference from discriminating findings or explicitly reason about missing evidence. Check the actual assigned relationship, not just a matching topic. A self-labelled apply/analyze value is not proof of reasoning. Prior questions: ${JSON.stringify(priorObjectives)}. Reject an item if any selected option is unsupported, any unselected option is true under the stem, the source does not support its conditions, or a distractor introduces an unsupported clinical drug, dose, population, action or threshold. ${domain === "general" ? "" : "Check clinical population, indications, contraindications, time course, units and exceptions."} ${evidence.length ? `Use these abstracts only to identify a direct conflict, never as sole proof: ${evidencePrompt(evidence)}` : "Use only the PDF."} Output exactly {"valid":true,"issues":[]} or {"valid":false,"issues":[{"index":1,"reason":"one short reason"}]}. Issue index is ONE-BASED QUESTION number, not an option index. Include at most one issue per question. No analysis or per-option list.\n<untrusted_pdf_text>\n${source}\n</untrusted_pdf_text>\n<items_to_audit>\n${JSON.stringify(questions)}\n</items_to_audit>`;
       const review = async () => {
         for (let reviewAttempt = 0; reviewAttempt < 2; reviewAttempt++) {
           try {

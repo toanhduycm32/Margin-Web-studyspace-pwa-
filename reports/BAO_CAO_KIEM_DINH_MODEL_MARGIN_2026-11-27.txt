@@ -1,0 +1,146 @@
+﻿Margin — kiểm định model và hiệu năng, 27/11/2026
+
+Chốt đợt kiểm định lúc 23:43, ngày 27/11/2026 (Asia/Saigon): chưa đủ điều kiện phát hành bản nâng cấp. Tài liệu này bổ sung báo cáo trước, không thay đổi kết quả lịch sử. Yêu cầu hiện hành nằm trong MODEL_QUALIFICATION_CONTEXT.md.
+
+Kết luận đã có bằng chứng
+
+Mistral có khả năng tạo câu trả lời giáo dục hoàn chỉnh bằng tiếng Việt. Kết luận trước đây chỉ dựa trên thời gian chờ 150 giây là chưa đủ. Tuy nhiên, cho phép nó chạy lâu hơn đã bộc lộ hai vấn đề riêng: thời gian mỗi yêu cầu có thể vượt giới hạn ứng dụng và bản trả lời hoàn chỉnh vẫn có thể sai/thiếu quan hệ quan trọng. Bước duyệt bằng chính model cũng không phải bảo đảm nội dung đúng.
+
+Chưa có bằng chứng cho một bản tóm tắt hoặc bộ câu hỏi hoàn chỉnh của giáo trình 222 trang đạt chuẩn hiện hành trong 10–15 phút. Chưa chọn model thay thế. Không thay model âm thầm khi model chính lỗi. Chưa đẩy hoặc triển khai các thay đổi trong lượt này lên GitHub/Vercel.
+
+Nguồn và cách thử
+
+- Giáo trình Răng Hàm Mặt, 222 trang, 11 bài, cùng bản trích xuất đã gây lỗi trước đây. Đoạn tóm tắt đầu có 6.492 ký tự, trang PDF 9–12; phần giải phẫu đầy đủ dùng cho câu hỏi có 14.374 ký tự. Phần bệnh lý tủy dùng cho ca lâm sàng có 8.640 ký tự, trang PDF 159–168.
+- Chạy trực tiếp các hàm thật của ứng dụng, cùng trình kiểm tra cấu trúc/đáp án, qua NVIDIA bằng khóa hiện có; không fallback. Không dùng đáp án giả để tính thành công model.
+- Chẩn đoán cho phép tối đa 420 giây mỗi yêu cầu (có thể cấu hình nhưng chặn ở 480 giây), 900 giây mỗi phép thử, tối đa 8 yêu cầu. Đây là phép thử ngoài giới hạn Vercel, không phải cấu hình triển khai.
+- Ghi thời gian kết nối, dữ liệu suy luận đầu tiên, nội dung cuối đầu tiên, hoàn tất, HTTP, dấu kết thúc và câu trả lời cuối. Không lưu khóa hay nội dung suy luận nội bộ; chỉ đếm ký tự suy luận. Không suy ra số token khi nhà cung cấp không trả usage.
+- Một số thử nghiệm độc lập chạy đồng thời, tối đa hai phép sinh đang hoạt động trong phần kiểm định model; không phải phép đo năng lực tải chuẩn hóa. Số mẫu nhỏ, thứ tự và tải NVIDIA có thể ảnh hưởng thời gian. Chênh lệch giữa các lần chưa chứng minh quan hệ nhân quả.
+- Các kế hoạch mục tiêu cũ dùng làm đầu vào đối chiếu, không phải một ma trận mới đã được chuyên gia duyệt. Chúng có lỗi ngôn ngữ riêng; 264 mục tiêu không đồng nghĩa 264 câu đạt chất lượng.
+- Nguồn, yêu cầu và kết quả thô giữ riêng ở .git/review-fixtures/qualification-*.json; không đưa giáo trình hoặc nội dung riêng tư vào Git. Các lần mới còn ghi dấu kiểm tra của file triển khai. Tổng cộng 23 hồ sơ kiểm định, 42 yêu cầu suy luận mới và 4 phản hồi được dùng lại theo yêu cầu trùng khớp; không còn phép thử chạy dở. Con số này không gồm ba phép dò hợp đồng/kết nối ngắn và lần bắt đầu rồi dừng trong giao diện.
+
+Kết quả thật đã hoàn tất
+
+| Phép thử | Thời gian tổng | Yêu cầu | Kết luận |
+|---|---:|---:|---|
+| Mistral — tóm tắt lần 1 | 257,18 giây | 2 | Trả đủ, ứng dụng nhận; kiểm tra thủ công chưa đạt vì gán chức năng tủy cho nguyên bào ngà và bỏ quan hệ quan trọng. |
+| Mistral — 2 câu lý thuyết | 177,80 giây | 2 | Hai câu một đáp án, khóa và giải thích có căn cứ nguồn; chưa chứng minh đa dạng cả bộ. |
+| Mistral — 2 câu lâm sàng | 345,99 giây | 3 | Có một lần viết lại do bộ kiểm tra tiếng Việt cũ trước khi duyệt. Có câu nhiều đáp án hoàn chỉnh; câu mang nhãn chẩn đoán còn hỏi nhớ lại dấu hiệu và lệch quan hệ được giao. Chưa đạt cả nhóm. |
+| Mistral — duyệt lại bản tóm tắt sai với chỉ dẫn dài | 420,01 giây | 1 | Hết thời gian chẩn đoán, chưa có quyết định cuối. |
+| Mistral — tóm tắt lần 2, chỉ dẫn gọn và schema bản nháp | 463,53 giây | 2 | 331,38 giây viết + 132,15 giây duyệt. Giữ quan hệ chính tốt hơn nhưng vẫn chép số nguồn mơ hồ, dài 695 đơn vị so với mốc 292. Bản nháp vượt 300 giây. Chưa đủ điều kiện triển khai. |
+| Mistral — 4 câu lâm sàng | 420,03 giây | 1 | Có dữ liệu suy luận, không có nội dung cuối trước hạn. Chưa được tăng cỡ nhóm thực tế. |
+| GLM-5.3 Flash — tóm tắt | 302,43 giây | 1 | Nhà cung cấp trả 504, chưa có nội dung để đánh giá. |
+| GLM — phép kết nối rất ngắn | 65 giây giới hạn | 1 | Hết thời gian; danh sách model không chứng minh model đang phục vụ được. |
+| MiniMax — tóm tắt với mặc định suy luận | 362,28 giây | 1 | Kết thúc vì giới hạn đầu ra, chưa có nội dung cuối. Lần đầu chưa đặt effort rõ; không dùng thất bại này để kết luận về cấu hình low mới. |
+| MiniMax — explicit low, chỉ dẫn mới | 47,95 giây | 2 | 38,32 giây viết + 9,62 giây duyệt; 611 đơn vị. Đọc thủ công giữ đúng quan hệ chủ yếu, bỏ số ống ngà mơ hồ, tiếng Việt dùng được. Một mẫu đạt chưa đủ đổi model cho mọi nhiệm vụ. |
+| MiniMax — kế hoạch phần 18 trang | 126,28 giây | 1 | Trả 12 mục tiêu và nêu rõ 5 nhóm nội dung chưa được phân bổ. Chưa phải bằng chứng bao phủ đầy đủ. |
+| MiniMax — 2 câu, kiểm tra tiếng Việt cũ | 282,75 giây | 2 | Bị ứng dụng nhận nhầm tiếng Việt; xem phần tái hiện và sửa bên dưới. |
+| MiniMax — dùng lại nháp 2 câu sau sửa | 21,12 giây mới | 1 mới + 1 dùng lại | Duyệt đạt; khóa có căn cứ. Không phải phép sinh mới hoàn toàn. |
+| MiniMax — 4 câu sau sửa | 260,02 giây | 1 | Có 5.288 ký tự nội dung cuối nhưng chưa kết thúc hoàn chỉnh trước hạn, nên không nhận bộ câu hỏi dở. |
+| MiniMax — cả phần, nhóm nhỏ | 133,00 giây | 4 | Một nhóm đạt; nhóm dày kiến thức quá dài sau hai lần sinh. Không có bản hoàn chỉnh được nhận. |
+| MiniMax — sửa từ bản nháp đã có | 70,65 giây mới | 1 mới + 3 dùng lại | Vẫn quá dài, không đạt. |
+| MiniMax — ngữ cảnh cả phần 14.374 ký tự | 140,44 giây | 2 | Hai bản 1.839 và 1.650 đơn vị vượt trần 1.553. Thử nghiệm không được chọn vào cấu hình cuối. |
+| MiniMax — duyệt bản sai / bản có căn cứ | 56,64 / 4,19 giây | 1 + 1 | Bắt đúng lỗi chủ thể và thiếu điểm phân biệt bệnh; nhận bản có căn cứ. Một nhận xét phụ quá sát chữ cần thẩm định, không coi mọi lý do reviewer là đúng. |
+| Nemotron Super — tóm tắt lần 1 | 37,47 giây | 2 | Hai bản quá dài; nhiều chi tiết chép lại và tiếng Việt lỗi. |
+| Nemotron Super — tóm tắt với chỉ dẫn gọn | 67,14 giây | 4 | Vẫn trộn tiếng Anh vào thuật ngữ; reviewer báo thiếu cả ý đã có và sửa sai quan hệ đúng. Không đạt. |
+| Nemotron Super — 4 câu lâm sàng | 104,64 giây | 5 | Có sai/thiếu điều kiện, câu giải thích kém, reviewer không ổn định; sửa có chọn lọc vẫn chưa đạt. |
+
+Hai câu lý thuyết Mistral tương đương khoảng 0,67 câu có căn cứ/phút trong đúng mẫu đó, gồm viết và duyệt. Không ngoại suy con số này thành hiệu năng toàn sách. Không tính câu chỉ có JSON hợp lệ hoặc chỉ được model tự duyệt là đã qua kiểm định giáo dục.
+
+Cấu hình MiniMax được kiểm tra thêm
+
+Sau kết quả mặc định không có đáp án cuối, đã đọc bổ sung model card và ví dụ NIM. Chúng có điều khiển effort mà biểu mẫu API không thể hiện đầy đủ. Lần mới dùng reasoning_effort=low, temperature=1, top_p=0.95; không thử ép tắt suy luận bằng một cờ chưa được xác nhận. Kết quả tốt hơn trong mẫu tóm tắt là bằng chứng cho tổ hợp cấu hình + prompt này, không cô lập được tác dụng riêng từng tham số. Chưa có kết luận cho câu lâm sàng hoặc cả sách.
+
+Vì sao tăng thời gian chờ chưa giải quyết được
+
+Ứng dụng hiện khai báo mỗi function tối đa 300 giây. Bản sửa đặt hạn NVIDIA 260 giây và hạn route 280 giây để còn thời gian lưu và trả lỗi trước hạn cứng. Mỗi yêu cầu HTTP chỉ tạo một phản hồi AI mới; bản nháp/duyệt đã hoàn tất được lưu trước lượt sau. Vì vậy, một tác vụ gồm nhiều yêu cầu có thể lâu hơn 5 phút mà vẫn hợp lệ, nhưng một yêu cầu đơn lẻ 331 giây vẫn không vừa cấu hình hiện tại.
+
+Mốc 10–15 phút của người dùng là tổng tác vụ đại diện, không phải quyền kéo mỗi function lên 15 phút. Streaming cho biết tiến độ nhưng không tự kéo dài thời hạn function. Thử header chờ bất đồng bộ của NVCF trên endpoint đang dùng chỉ nhận 504, chưa nhận được tác vụ 202 có thể lấy kết quả sau; chưa tích hợp một cơ chế không được chứng minh.
+
+Đối chứng Mistral với nguồn ngắn thật ở trang 11: bản gán sai chủ thể bị từ chối sau 233,54 giây; bản có căn cứ được nhận sau 82,83 giây. Hai phép này dùng schema reviewer hoàn chỉnh và chỉ chứng minh khả năng phân biệt ở hai mẫu đó.
+
+Số lượt gọi và việc tăng cỡ nhóm
+
+Với ma trận cũ 264 mục tiêu và 22 đoạn có nội dung cần lập kế hoạch:
+
+| Cỡ nhóm giả định | Nhóm câu hỏi | Lượt tối thiểu: kế hoạch + viết + duyệt |
+|---|---:|---:|
+| 2 câu | 137 | 296 |
+| 4 câu | 74 | 170 |
+| 6 câu | 54 | 130 |
+| 8 câu | 41 | 104 |
+
+Đây là phép tính, không phải kết quả chạy thành công; chưa tính sửa lỗi, truy xuất Drive hoặc đối chiếu nguồn ngoài. Mặc định 200 lượt/ngày/người khiến phương án 2 câu không hoàn thành ma trận đó trong một ngày ngay cả khi không có lỗi. Không tự tăng quota để che vấn đề.
+
+Thử 4 câu đã cho thấy cả Mistral và Super chưa đạt trong cấu hình thử. Vì vậy cỡ nhóm runtime vẫn là 2, chưa bật 4/6/8 chỉ để số lượt trông đẹp. Chỉ dẫn chung của từng câu đã được đưa ra một lần: giảm 2.349 ký tự lặp ở nhóm 4 và 3.915 ở nhóm 6, giữ nguyên các quy tắc. Chưa có bằng chứng rằng riêng thay đổi này đủ đạt mục tiêu thời gian. Nhóm 4 MiniMax sau sửa kiểm tra tiếng Việt cũng chưa hoàn tất trước hạn 260 giây. Chưa thử nâng lên 6/8 khi nhóm 4 chưa đạt.
+
+Chỉ dẫn tóm tắt mới giảm từ 12.122 xuống 9.090 ký tự trên cùng nguồn 6.492 ký tự. Lần Mistral mới vẫn chậm hơn; không tuyên bố rút gọn prompt đã tăng tốc khi số đo không cho thấy điều đó.
+
+Lỗi kiểm tra tiếng Việt được tái hiện và sửa
+
+Hai lần sinh MiniMax lâm sàng đầu tiên bị loại trước bước duyệt AI, tổng 282,75 giây. Nguyên nhân cụ thể là bộ kiểm tra yêu cầu ít nhất hai từ trong một danh sách rất ngắn; câu tiếng Việt đúng dùng nhiều từ chuyên môn nhưng ít từ trong danh sách đã bị nhận nhầm. Đây là lỗi ứng dụng, không phải bằng chứng model không biết tiếng Việt.
+
+Đã sửa bằng tín hiệu chính tả tiếng Việt và tỷ lệ từ có dấu, đồng thời kiểm tra trường hợp tiếng Anh chỉ chèn vài thuật ngữ Việt, Unicode tổ hợp và câu quá ngắn. Vẫn giữ kiểm tra độ đầy đủ từng giải thích, nguồn, khóa đáp án và duyệt nội dung. Dùng lại đúng bản nháp đầu với yêu cầu trùng khớp; reviewer thật nhận hai câu sau 21,10 giây. Tổng phần viết đầu 117,50 + duyệt mới 21,10 = 138,60 giây, là tổng cộng hai lần thử có tái sử dụng, không phải một phép chạy mới liền mạch. Khóa có căn cứ, có một câu nhiều đáp án và một ca suy luận; một cụm diễn đạt của câu đầu còn vụng, cần tiếp tục đánh giá chất lượng ngôn ngữ.
+
+Các thay đổi đã thực hiện
+
+1. Tắt fallback tự động sang model chưa được kiểm định; giữ model thực dùng trong kết quả và nhận dạng checkpoint.
+2. Thêm phép kiểm định trực tiếp có giới hạn thời gian/số lượt, lưu chứng cứ riêng và phân biệt HTTP thành công với nội dung đạt.
+3. Điều chỉnh thời hạn từng bước trong giới hạn 300 giây; không đặt mỗi request thành 15 phút.
+4. Dùng điều khiển riêng cho Mistral, GLM, MiniMax và Nemotron; không áp dụng một cờ suy luận cho mọi model.
+5. Tóm tắt bằng chỉ dẫn tiếng Việt gọn hơn; ưu tiên đúng chủ thể/chức năng, diễn biến, phân biệt bệnh, điều kiện và sự không rõ của nguồn.
+6. Dùng JSON schema cho tóm tắt và duyệt tóm tắt Mistral. Phép thử nhỏ thật đã xác nhận endpoint nhận schema. Schema chỉ bảo vệ hình dạng dữ liệu, không chứng minh kiến thức đúng.
+7. Yêu cầu câu chẩn đoán phải suy luận từ phát hiện phân biệt; nhãn apply/analyze tự khai báo không được xem là bằng chứng.
+8. Mã tác vụ tiếp tục được lưu qua lần đóng tab, tách theo tài khoản, phiên bản PDF, loại học liệu và phiên bản quy tắc. Không lưu văn bản PDF/đáp án vào mã này.
+9. Chờ trang hiện lại và có mạng trước yêu cầu AI tiếp theo; mô tả rõ giới hạn chạy nền và hiển thị phần đã xong thay vì phần trăm tổng gây hiểu nhầm.
+10. Giữ các kiểm tra tài khoản, chữ ký dữ liệu, toàn bộ tài liệu và thay thế an toàn; không thay OAuth origin, không thêm Supabase, cơ sở dữ liệu hoặc dịch vụ trả tiền.
+
+Ngữ cảnh dài và sửa tóm tắt
+
+Lần thử cả phần 18 trang với các nhóm 6.500 ký tự thất bại sau 133,00 giây: nhóm thứ hai viết 759 rồi 868 đơn vị, vượt trần 636; có câu dừng giữa chừng vì văn bản bị chia đúng ranh giới trang. Việc đưa lại bản nháp để biên tập vẫn thất bại sau 70,65 giây mới, còn 774 đơn vị. Các phản hồi trước được dùng lại theo đúng dấu nhận dạng; không tính chúng là lượt gọi mới.
+
+Đã mở thử cấu hình ngữ cảnh 18.000 ký tự riêng cho MiniMax, giữ trần độ dài tổng theo cùng công thức. Mục đích là giữ quan hệ liên trang và tránh áp một phần ngân sách quá nhỏ lên tiểu mục dày kiến thức. Cấu hình Mistral vẫn dùng 6.500. Phép thử hoàn tất sau 140,44 giây nhưng cả hai bản vẫn quá dài (1.839 và 1.650 đơn vị, trần 1.553). Cấu hình 18.000 ký tự và thử nghiệm sửa từ toàn bộ bản nháp đã được rút khỏi runtime cuối vì chưa đạt. Runtime giữ nhóm 6.500 ký tự và cỡ nhóm hai câu; việc phân chia ngữ nghĩa liên trang vẫn là hạn chế cần giải quyết, không được ghi là đã sửa xong.
+
+Chạy nền, đóng ứng dụng và phục hồi
+
+| Hành động | Hành vi đã triển khai / giới hạn |
+|---|---|
+| Đóng bảng học tập, tiếp tục đọc | Trang vẫn hiện; việc tạo có thể tiếp tục. |
+| Chuyển ứng dụng hoặc khóa máy | Trình duyệt có thể ngừng JavaScript; không hứa chạy liên tục. |
+| Mất mạng | Chờ có mạng trước bước tiếp; yêu cầu đang chạy có thể lỗi. |
+| Đóng tab/PWA, mở lại cùng nơi | Nhận ra mã tác vụ và hiện nút Tiếp tục; dùng checkpoint server còn hợp lệ. |
+| Xóa dữ liệu trình duyệt, đổi thiết bị | Chưa có chức năng tìm lại tác vụ liên thiết bị. |
+| Dừng/thất bại khi tạo lại | Bản học liệu đã được chấp nhận trước đó vẫn giữ đến khi bản thay thế đã qua kiểm tra và lưu thành công. |
+
+Đã thử trong phiên Chrome có đăng nhập: mở PDF gốc 222 trang, đọc/trích xuất, bắt đầu rồi dừng tóm tắt, đóng hẳn tab, mở lại và thấy nút Tiếp tục hoạt động. Đây là bằng chứng nhận lại tác vụ, không phải bằng chứng đã hoàn tất toàn bộ giáo trình hoặc thử trên iPhone vật lý.
+
+Phần còn chưa được chứng minh
+
+- Một bản tóm tắt và một ngân hàng câu hỏi hoàn chỉnh của giáo trình thật, đạt cả độ phủ, tiếng Việt, khóa và suy luận lâm sàng.
+- Mục tiêu 10–15 phút cho tác vụ đại diện với model/configuration đã chọn và từng request vừa giới hạn triển khai.
+- Chất lượng reviewer trên tập đối chứng đủ lớn; các đối chứng nhỏ chỉ phát hiện lỗi cơ bản.
+- Hai tài khoản Google thật cùng tạo học liệu đồng thời; iPhone/Home Screen và hành vi khóa máy thực tế.
+- Bộ kiểm tra tự động không thay thế đọc nội dung hoặc thẩm định chuyên môn.
+
+Hướng đi được bằng chứng hỗ trợ
+
+Giữ production hiện tại, chỉ phát hành phần AI mới sau khi có mẫu đạt cả nội dung và thời hạn. Tiếp tục ưu tiên cấu hình nhẹ đúng hợp đồng của model có sẵn, rồi mới tăng nhóm theo kết quả. Nếu không có cấu hình đáp ứng, cần báo rõ giới hạn; xử lý toàn sách thành nhiều phiên có thể bảo toàn chất lượng nhưng không được quảng bá là đã đạt 15 phút. Thay nhà cung cấp hoặc hạ tầng chạy nền là thay đổi khác, chưa được thực hiện và không mặc định được chấp thuận. Không hạ chuẩn hoặc bỏ bước duyệt để đạt số đo.
+
+Nguồn kỹ thuật đã đối chiếu
+
+- NVIDIA — Mistral Large 4 — https://docs.nvidia.com/nim/large-language-models/2.1.4/get-started/advanced/get-started-mistral-large-4: điều khiển suy luận riêng; kết quả hosted thực tế vẫn là bằng chứng quyết định.
+- NVIDIA — GLM-5.3 Flash — https://docs.nvidia.com/nim/large-language-models/2.1.4/get-started/advanced/get-started-glm-5.3-flash: low/high/max; không dùng giá trị generic của model khác.
+- NVIDIA — MiniMax model card — https://build.nvidia.com/minimaxai/minimax-m3.1-flash/modelcard: cấu hình effort và sampling. Biểu mẫu API không liệt kê đủ không có nghĩa model không hỗ trợ điều chỉnh.
+- NVIDIA — MiniMax NIM guide — https://docs.nvidia.com/nim/large-language-models/2.1.4/get-started/advanced/get-started-minimax-m3-1-flash: đối chiếu ví dụ request; tài liệu các phiên bản có khác biệt, không tự suy rằng hosted hỗ trợ mọi cờ tắt suy luận.
+- Vercel function limits — https://vercel.com/docs/functions/limitations: thời hạn phụ thuộc cấu hình/gói; không đổi gói hoặc khẳng định tài khoản hiện tại đã có hạn dài hơn.
+- NVCF polling contract — https://docs.api.nvidia.com/cloud-functions/reference/getfunctioninvocationresult: hợp đồng generic; chưa xác nhận được hành vi tương ứng ở endpoint hosted hiện tại.
+- WebKit service-worker lifecycle — https://webkit.org/blog/8090/workers-at-your-service/: tài liệu nền về vòng đời, không phải phép thử iPhone hiện tại.
+
+Kiểm tra phần mềm
+
+102 bài kiểm tra tự động đạt, 6 bài tích hợp trực tiếp chỉ chạy khi được bật riêng. Những lần live thất bại trong bảng vẫn là thất bại thật; chúng không được đổi thành pass bằng cách bỏ qua. TypeScript, production build và kiểm tra khoảng trắng của bản cuối đều đạt. Máy chủ thử local đã dừng, các tab kiểm tra đã đóng; không còn tiến trình kiểm định cục bộ chạy nền. Chưa commit/push/merge/deploy các thay đổi trong lượt này.
+
+Quyết định cuối của đợt này
+
+Giữ Mistral trong cấu hình mặc định hiện có của nhánh review, không tự đổi production sang MiniMax từ vài mẫu nhỏ. MiniMax low là hướng khả thi hơn để thử tiếp, nhưng chưa đạt phần tóm tắt dài và nhóm 4 dưới hạn triển khai. Phần đã sửa chắc chắn là lỗi nhận diện tiếng Việt, phục hồi tác vụ cùng trình duyệt, vô hiệu hóa fallback chưa đạt, giới hạn từng request, giảm chỉ dẫn lặp và bộ kiểm định có chứng cứ. Các cải tiến prompt/schema không được mô tả là đã bảo đảm chất lượng.
+
+Muốn hoàn tất việc chọn model cần một cấu hình vừa giữ đủ ý khi tóm tắt phần dài, vừa sinh/duyệt các nhóm câu ổn định. Sau đó mới chạy trọn một tài liệu đại diện qua PDF → kế hoạch → sinh → duyệt → Drive → mở lại, đo đủ 10–15 phút và thử hai người dùng. Chưa có cơ sở để bỏ các bước đó hoặc báo toàn bộ đã ổn.

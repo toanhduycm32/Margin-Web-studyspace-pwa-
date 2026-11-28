@@ -1,5 +1,7 @@
 # MARGIN — VIETNAMESE MEDICAL & DENTAL LEARNING UPGRADE
 
+Current authority: the owner's 28 November Engineering Workflow & AI Execution Redesign, maintained in [ARCHITECTURE.md](ARCHITECTURE.md). Practical educational quality supersedes maximum depth, one-objective/one-question allocation, fixed Mistral primary, uniform tiny review batches and rigid summary-length gates. Question quantity, explanation length and advanced sophistication may decrease; medical/source correctness, major-section coverage, Vietnamese output, meaningful diversity, multiple-correct majority, isolation and safe replacement remain protected. Both engineering and runtime workflows belong to ARCHITECTURE.md; observed progress belongs to STATUS.md and AI_QUALITY_DECISIONS.md. The older detailed domain guidance below is retained only where compatible with these current priorities. MODEL_QUALIFICATION_CONTEXT.md is historical investigation context, not a requirement to repeat the model comparison.
+
 ## Current Context Handoff
 
 **Date:** November 27, 2026\

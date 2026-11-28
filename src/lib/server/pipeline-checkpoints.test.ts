@@ -28,15 +28,15 @@ it("does not expose or finalize an unreviewed draft and resumes a rejected summa
   const fixed = digest + " Điều kiện D cũng phải được bảo đảm.";
   const completion = (value: unknown) => Response.json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(value) } }] });
   const fetch = vi.fn().mockResolvedValueOnce(completion({ digest }))
-    .mockResolvedValueOnce(completion({ valid: false, issues: ["Thiếu điều kiện D."] }))
+    .mockResolvedValueOnce(completion({ checks: [{ unit: 1, references: ["E1"], issue: "Thiếu điều kiện D." }], omissions: [] }))
     .mockResolvedValueOnce(completion({ digest: fixed }))
-    .mockResolvedValueOnce(completion({ valid: true, issues: [] }));
+    .mockResolvedValueOnce(completion({ checks: [{ unit: 1, references: ["E1"], issue: "" }], omissions: [] }));
   vi.stubGlobal("fetch", fetch);
   const principal = { sub: "alice", accessToken: "alice-token" };
   const input: ChunkInput = { kind: "summary", operationId: "12345678-1234-1234-1234-123456789abc",
     documentId: "file12345678", sourceMd5: "a".repeat(32), chunkIndex: 0, chunkCount: 1,
     startPage: 1, endPage: 1, pageCount: 1, requestedCount: 0, emptyPages: [],
-    text: "Page 1\nĐiều kiện A, B và D cần đồng thời có; điều kiện C là ngoại lệ phải được loại trừ.",
+    text: `Page 1\n${fixed}`,
     section: { id: "section-1", title: "Điều kiện áp dụng", startPage: 1, endPage: 1, source: "heading" },
     summaryProfile: "medical", wordTarget: 40 };
   for (let request = 1; request <= 3; request++) {

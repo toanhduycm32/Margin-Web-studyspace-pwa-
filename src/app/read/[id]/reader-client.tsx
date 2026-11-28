@@ -10,7 +10,8 @@ import { documentSections, sectionLearningText } from "@/lib/client/structure";
 import { correctOptionIds, responseType } from "@/lib/shared/quiz";
 import { newOptionOrders } from "@/lib/shared/attempt-order";
 import { sectionWordTarget, STUDY_RULE_VERSION } from "@/lib/shared/study-rules";
-import { objectiveBlueprint } from "@/lib/shared/education";
+import { sectionQuestionFormats } from "@/lib/shared/learning-workload";
+import { generationKey, generationStorage, rememberedGeneration, rememberGeneration, forgetGeneration, waitForReader } from "@/lib/client/generation-session";
 import type { ArtifactRecord, AttemptRecord, ChunkResult, DocumentRecord, DriveFile, QuizQuestion, SignedMap } from "@/lib/shared/types";
 import PageSurface from "./page-surface";
 import SummaryContent from "./summary-content";
@@ -44,12 +45,16 @@ export default function ReaderClient({ id }: { id: string }) {
   const [running, setRunning] = useState<Running | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [resumable, setResumable] = useState<Set<string>>(new Set());
   const contentRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const resourceRequestRef = useRef(0);
   const submittingRef = useRef(false);
   const positionRef = useRef({ page: 1, offset: 0 });
+  const preparedRef = useRef<{ key: string; pdf: PDFDocumentProxy;
+    sections: Awaited<ReturnType<typeof documentSections>>;
+    chunks: Array<ReturnType<typeof partitionSectionPages>[number] & { excluded: boolean }> } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +69,9 @@ export default function ReaderClient({ id }: { id: string }) {
         setCurrentPage(document.record.progress.page);
         positionRef.current = { page: document.record.progress.page, offset: document.record.progress.offset };
         if (document.changed) setNotice("PDF đã thay đổi trong Drive. Học liệu cũ thuộc phiên bản trước của tài liệu.");
+        const account = await api<{ email: string }>("/api/auth/me");
+        if (!cancelled && document.file.md5Checksum) setResumable(new Set(["summary", "quiz"].filter((kind) =>
+          rememberedGeneration(generationKey(account.email, STUDY_RULE_VERSION, id, document.file.md5Checksum!, kind), ...generationStorage()))));
       } catch (caught) { if (!cancelled) setError(caught instanceof Error ? caught.message : "Could not open this PDF."); }
     }
     void load();
@@ -193,39 +201,40 @@ export default function ReaderClient({ id }: { id: string }) {
       const [config, account] = await Promise.all([api<{ missing: string[] }>("/api/config"), api<{ email: string }>("/api/auth/me")]);
       if (config.missing.includes("NVIDIA_API_KEY")) throw new Error("Add NVIDIA_API_KEY to .env.local before using AI.");
       setRunning({ stage: "Đang đọc toàn bộ tài liệu", done: 0, total: pdf.numPages });
-      const pages = await extractTextPages(pdf, (done, total) => setRunning({ stage: "Đang đọc toàn bộ tài liệu", done, total }), controller.signal);
-      const sections = await documentSections(pdf, pages);
-      const learningPages = sectionLearningText(pages, sections);
-      const chunks = partitionSectionPages(learningPages, sections).map((chunk) => ({ ...chunk,
-        emptyPages: pages.filter((page) => page.page >= chunk.startPage && page.page <= chunk.endPage && !page.text.trim()).map((page) => page.page),
-        excluded: learningPages.filter((page) => page.page >= chunk.startPage && page.page <= chunk.endPage).every((page) => !page.text.trim()),
-      }));
-      const evidenceMode = "research";
-      operationKey = `margin-ai-${account.email}-${STUDY_RULE_VERSION}-${id}-${file.md5Checksum}-${kind}`;
-      const operationId = sessionStorage.getItem(operationKey) || crypto.randomUUID();
-      sessionStorage.setItem(operationKey, operationId);
+      const preparedKey = `${account.email}:${id}:${file.md5Checksum}:${STUDY_RULE_VERSION}`;
+      if (preparedRef.current?.key !== preparedKey || preparedRef.current.pdf !== pdf) {
+        preparedRef.current = null;
+        const pages = await extractTextPages(pdf, (done, total) => setRunning({ stage: "Đang đọc toàn bộ tài liệu", done, total }), controller.signal);
+        const sections = await documentSections(pdf, pages);
+        const learningPages = sectionLearningText(pages, sections);
+        const chunks = partitionSectionPages(learningPages, sections).map((chunk) => ({ ...chunk,
+          emptyPages: pages.filter((page) => page.page >= chunk.startPage && page.page <= chunk.endPage && !page.text.trim()).map((page) => page.page),
+          excluded: learningPages.filter((page) => page.page >= chunk.startPage && page.page <= chunk.endPage).every((page) => !page.text.trim()),
+        }));
+        preparedRef.current = { key: preparedKey, pdf, sections, chunks };
+      }
+      const { sections, chunks } = preparedRef.current;
+      const evidenceMode = "pdf";
+      operationKey = generationKey(account.email, STUDY_RULE_VERSION, id, file.md5Checksum, kind);
+      const operationId = rememberedGeneration(operationKey, ...generationStorage()) || crypto.randomUUID();
+      rememberGeneration(operationKey, operationId, ...generationStorage());
+      setResumable((old) => new Set(old).add(kind));
+      const waitUntilReady = () => waitForReader(controller.signal, () => setRunning((old) => old && ({ ...old,
+        stage: "Tạm nghỉ — trở lại Margin và kết nối mạng để tiếp tục" })));
+      await waitUntilReady();
       await api("/api/ai/begin", { method: "POST", signal: controller.signal,
         body: JSON.stringify({ id: operationId, documentId: id, sourceMd5: file.md5Checksum, kind }) });
       const sectionSizes = new Map(sections.map((section) => [section.id,
         chunks.filter((chunk) => chunk.section?.id === section.id).reduce((sum, chunk) => sum + chunk.text.length, 0)]));
-      const plans: SignedMap[] = [];
-      if (kind === "quiz") {
-        for (let index = 0; index < chunks.length; index++) {
-          setRunning({ stage: "Lập ma trận kiến thức cho toàn tài liệu", done: index, total: chunks.length });
-          const chunk = chunks[index];
-          plans.push(await api<SignedMap>("/api/ai/plan", { method: "POST", signal: controller.signal,
-            body: JSON.stringify({ ...chunk, kind, operationId, documentId: id, sourceMd5: file.md5Checksum,
-              chunkIndex: index, chunkCount: chunks.length, pageCount: pdf.numPages }) }));
-        }
-      }
-      const blueprint = objectiveBlueprint(plans.map(({ map }) => ({ objectives: map.objectives || [], limitations: map.planningLimitations || [] })));
-      requestedCount = blueprint.reduce((total, part) => total + part.formats.length, 0);
+      const blueprint = chunks.map((chunk) => sectionQuestionFormats(chunk.text,
+        chunk.excluded || chunk.section?.role === "front_matter"));
+      requestedCount = kind === "quiz" ? blueprint.reduce((total, formats) => total + formats.length, 0) : 0;
       if (kind === "quiz" && !requestedCount) throw new Error("Chưa tìm thấy đủ nội dung có chứng cứ để tạo trắc nghiệm.");
       if (requestedCount > 800) throw new Error("Ma trận vượt sức chứa của một lượt xử lý. Chưa lưu bộ câu hỏi thiếu nội dung; bản cũ vẫn được giữ.");
       const signed: SignedMap[] = [];
       for (let index = 0; index < chunks.length; index++) {
         if (controller.signal.aborted) throw new Error("Đã dừng xử lý. Thử lại để tiếp tục từ phần đã lưu.");
-        setRunning({ stage: kind === "summary" ? "Đang viết tóm tắt theo từng bài" : `Tạo ${requestedCount} câu hỏi theo ma trận`, done: index, total: chunks.length });
+        setRunning({ stage: kind === "summary" ? "Đang viết tóm tắt theo từng bài" : `Tạo ${requestedCount} câu ôn tập theo các phần chính`, done: index, total: chunks.length });
         const chunk = chunks[index];
         const sectionSize = sectionSizes.get(chunk.section!.id) || chunk.text.length;
         const wordTarget = profile ? Math.min(1800, Math.max(20, Math.round(sectionWordTarget(profile, sectionSize) * chunk.text.length / sectionSize))) : undefined;
@@ -233,13 +242,13 @@ export default function ReaderClient({ id }: { id: string }) {
           chunkIndex: index, chunkCount: chunks.length, startPage: chunk.startPage, endPage: chunk.endPage,
           pageCount: pdf.numPages, requestedCount, emptyPages: chunk.emptyPages, text: chunk.text,
           section: chunk.section, excluded: chunk.excluded, summaryProfile: profile, wordTarget, evidenceMode,
-          objectives: kind === "quiz" ? blueprint[index].objectives : undefined, learningPlan: plans[index],
-          plannedFormats: kind === "quiz" ? blueprint[index].formats : undefined,
-          plannedFamilies: kind === "quiz" ? blueprint[index].families : undefined });
+          plannedFormats: kind === "quiz" ? blueprint[index] : undefined,
+          plannedFamilies: kind === "quiz" ? [] : undefined });
         let result: SignedMap | null = null;
-        const maxSteps = kind === "quiz" ? blueprint[index].formats.length * 10 + 8 : 80;
+        const maxSteps = 8;
         for (let step = 0; !result && step < maxSteps; step++) {
           for (let retry = 0; retry < 4; retry++) {
+            await waitUntilReady();
             try {
               const response = await api<ChunkResult>("/api/ai/chunk", { method: "POST", signal: controller.signal, body });
               if ("pending" in response) {
@@ -265,7 +274,8 @@ export default function ReaderClient({ id }: { id: string }) {
         body: JSON.stringify({ kind, operationId, documentId: id, sourceMd5: file.md5Checksum, requestedCount,
           summaryProfile: profile, evidenceMode, maps: signed }),
       });
-      sessionStorage.removeItem(operationKey);
+      forgetGeneration(operationKey, ...generationStorage());
+      setResumable((old) => { const next = new Set(old); next.delete(kind); return next; });
       resourceRequestRef.current++;
       activeIdRef.current = result.artifact.id;
       setActive(result.artifact); setAnswers([]); setSubmitted(null); setPreviousAttempt(null); setQuizPage(0);
@@ -276,7 +286,8 @@ export default function ReaderClient({ id }: { id: string }) {
         "Đã lưu học liệu vào Drive. Mở lại PDF để cập nhật danh sách.");
     } catch (caught) {
       if (operationKey && caught instanceof ApiError && ["RESTART_GENERATION", "GENERATION_SUPERSEDED"].includes(caught.code || "")) {
-        sessionStorage.removeItem(operationKey);
+        forgetGeneration(operationKey, ...generationStorage());
+        setResumable((old) => { const next = new Set(old); next.delete(kind); return next; });
       }
       setError(controller.signal.aborted ? "Đã dừng. Bản hiện hành vẫn được giữ; bạn có thể tiếp tục phần đang tạo." :
       caught instanceof Error ? caught.message : "Whole-PDF processing failed."); }
@@ -326,9 +337,12 @@ export default function ReaderClient({ id }: { id: string }) {
     {!pdf ? <div className="reader-loading-inline">{error ? <button className="button secondary" onClick={() => window.location.reload()}>Thử mở lại PDF</button> : "Đang mở bản PDF gốc…"}</div> : <main className="pdf-flow" ref={contentRef}>{Array.from({ length: pdf.numPages }, (_, index) => <PageSurface key={index + 1} pdf={pdf} number={index + 1} width={width} active={near.has(index + 1)} />)}</main>}
     {sheetOpen && <><button className="sheet-backdrop" aria-label="Đóng bảng học tập" onClick={() => setSheetOpen(false)} /><aside className="study-sheet" aria-label="Học liệu của tài liệu"><div className="sheet-header"><div><span className="eyebrow">TÀI LIỆU NÀY</span><h2>{active ? active.kind === "summary" ? "Tóm tắt" : "Trắc nghiệm" : "Học cùng tài liệu"}</h2></div><button className="sheet-close" aria-label="Đóng bảng học tập" onClick={() => setSheetOpen(false)}>×</button></div><div className="sheet-body">
       {error && <div className="alert error" role="alert">{vietnameseMessage(error)}<button onClick={() => setError("")} aria-label="Đóng thông báo lỗi">×</button></div>}
-      {running && <div className="processing"><div className="processing-symbol">✦</div><h3>{running.stage}</h3><p>{running.stage === "Đang đọc toàn bộ tài liệu" ? `${running.done}/${running.total} trang` : `${Math.round(running.done / Math.max(1, running.total) * 100)}% hoàn tất`}</p><div className="progress-track"><div style={{ width: `${Math.round(running.done / Math.max(1, running.total) * 100)}%` }} /></div><p className="quiet">Bạn có thể đóng bảng này để tiếp tục đọc. Các phần hoàn tất đã được lưu; bản hiện hành vẫn còn nguyên.</p><button className="text-link" disabled={running.committing} onClick={() => abortRef.current?.abort()}>{running.committing ? "Đang xác nhận lưu vào Drive…" : "Dừng xử lý"}</button></div>}{active ? <>
+      {running && <div className="processing"><div className="processing-symbol">✦</div><h3>{running.stage}</h3><p>{running.stage === "Đang đọc toàn bộ tài liệu" ? `${running.done}/${running.total} trang` : `${running.done}/${running.total} phần đã hoàn tất`}</p><div className="progress-track"><div style={{ width: `${Math.round(running.done / Math.max(1, running.total) * 100)}%` }} /></div><p className="quiet">Bạn có thể đóng bảng này để đọc tiếp. Khi chuyển ứng dụng, khóa máy hoặc mất mạng, việc tạo có thể tạm dừng. Mở lại Margin trên trình duyệt này và chọn Tiếp tục để dùng các bước đã lưu vào Drive.</p><button className="text-link" disabled={running.committing} onClick={() => abortRef.current?.abort()}>{running.committing ? "Đang xác nhận lưu vào Drive…" : "Dừng xử lý"}</button></div>}{active ? <>
         <button className="text-link back-to-tools" onClick={() => { resourceRequestRef.current++; activeIdRef.current = null; setActive(null); setAnswers([]); setSubmitted(null); }}>← Học liệu của tài liệu</button>
         <p className="resource-meta">Đã tạo {humanDate(active.createdAt)} · {active.readablePages}/{active.pageCount} trang trích xuất được văn bản{active.sourceMd5 !== file.md5Checksum ? " · Phiên bản PDF trước" : ""}</p>
+        {active.evidenceMode !== "research" && <p className="resource-meta">{active.kind === "quiz"
+          ? "Câu hỏi chọn lọc từ PDF; không thay thế việc đọc toàn bộ tài liệu."
+          : "Tóm tắt từ văn bản PDF; chưa đối chiếu nguồn ngoài."}</p>}
         {active.evidenceMode === "research" && <div className="coverage-warning">Đối chiếu nguồn ngoài khi có nội dung phù hợp. {active.evidenceReferences?.length
           ? <>Các nguồn dưới đây được tham khảo để đối chiếu; điều này không xác minh mọi nhận định: {active.evidenceReferences.map((reference, index) =>
             <span key={reference.url}>{index ? "; " : ""}<a href={reference.url} target="_blank" rel="noopener noreferrer">{reference.title} ({reference.year})</a>{reference.kind === "curated_guideline_note" ? ` — ghi chú đối chiếu ${reference.reviewedAt || "đã tuyển chọn"}` : reference.kind === "research_abstract" ? " — tóm lược nghiên cứu" : ""}</span>)}</>
@@ -371,7 +385,7 @@ export default function ReaderClient({ id }: { id: string }) {
       </> : <><p className="sheet-intro">Học từ toàn bộ tài liệu. Nội dung, độ dài và số câu hỏi được phân bổ theo kiến thức trong PDF.</p><div className="study-actions">{(["summary", "quiz"] as const).map((kind) => {
           const saved = artifacts.find((item) => item.kind === kind);
           return <div className="resource-action" key={kind}><button className="study-action" disabled={!pdf || !!running && !saved}
-            onClick={() => saved ? void openArtifact(saved.id) : void run(kind)}><span className="action-glyph">{kind === "summary" ? "≡" : "?"}</span><span><strong>{kind === "summary" ? saved ? "Xem tóm tắt" : "Tóm tắt tài liệu" : saved ? "Làm trắc nghiệm" : "Tạo trắc nghiệm"}</strong><small>{saved ? `${humanDate(saved.createdAt)}${saved.sourceMd5 !== file.md5Checksum ? " · Phiên bản PDF trước" : ""}` : kind === "summary" ? "Giải thích theo từng bài và đề mục" : "Lý thuyết và vận dụng có chứng cứ"}</small></span><b>→</b></button>{saved && <button className="text-link regenerate" disabled={!!running || !pdf} onClick={() => void run(kind)}>{kind === "summary" ? "Tạo lại tóm tắt" : "Tạo lại trắc nghiệm"}</button>}</div>;
+            onClick={() => saved ? void openArtifact(saved.id) : void run(kind)}><span className="action-glyph">{kind === "summary" ? "≡" : "?"}</span><span><strong>{kind === "summary" ? saved ? "Xem tóm tắt" : resumable.has(kind) ? "Tiếp tục tóm tắt" : "Tóm tắt tài liệu" : saved ? "Làm trắc nghiệm" : resumable.has(kind) ? "Tiếp tục trắc nghiệm" : "Tạo trắc nghiệm"}</strong><small>{saved ? `${humanDate(saved.createdAt)}${saved.sourceMd5 !== file.md5Checksum ? " · Phiên bản PDF trước" : ""}` : kind === "summary" ? "Giải thích theo từng bài và đề mục" : "Lý thuyết và vận dụng có chứng cứ"}</small></span><b>→</b></button>{saved && <button className="text-link regenerate" disabled={!!running || !pdf} onClick={() => void run(kind)}>{resumable.has(kind) ? "Tiếp tục phần đang tạo" : kind === "summary" ? "Tạo lại tóm tắt" : "Tạo lại trắc nghiệm"}</button>}</div>;
         })}</div><p className="privacy-note">Bản hiện hành được giữ đến khi bản mới tạo và lưu thành công. Khi tạo học liệu, văn bản PDF được gửi đến NVIDIA. Không sử dụng hồ sơ có thông tin nhận diện người bệnh. Tài liệu scan và hình ảnh có thể chưa đọc được.</p></>}
     </div></aside></>}
   </div>;
