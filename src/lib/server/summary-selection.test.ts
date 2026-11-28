@@ -40,7 +40,7 @@ it("reviews the rendered original span, not a model's changed wording", async ()
   changed.blocks[0].passages[0].text = "Tủy chứa hydroxyapatite để nuôi dưỡng.";
   const completed = (value: unknown) => Response.json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(value) } }] });
   const request = vi.fn().mockResolvedValueOnce(completed(changed)).mockResolvedValueOnce(completed({ checks:
-    [1, 2, 3, 4, 5].map((unit) => ({ unit, references: ["E2"], issue: "" })), omissions: [] }));
+    [1, 2, 3, 4].map((unit) => ({ unit, references: ["E2"], issue: "" })), omissions: [] }));
   vi.stubGlobal("fetch", request);
   const result = await summarizeChunk(source, 1, 1, "medical", "Tủy", "heading", 100, async () => {});
   expect(result).toContain("HTMM nuôi dưỡng");

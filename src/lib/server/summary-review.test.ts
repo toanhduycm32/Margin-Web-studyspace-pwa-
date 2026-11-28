@@ -1,13 +1,22 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { sourcePreservingIssue, validateSummaryReview } from "./summary-review";
+import { sourcePreservingIssue, summaryReviewUnits, validateSummaryReview } from "./summary-review";
 import { summarizeChunk } from "./nvidia";
 import { GenerationContinuation, withGenerationCheckpoints, type CheckpointValue } from "./generation-checkpoints";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 const source = "Tủy chứa HTMM nuôi dưỡng các thành phần sống của phức hợp ngà–tủy.\nLấy tủy một phần thường chỉ định với răng chưa đóng kín chóp.";
-const digest = "### Tủy\nTủy chứa HTMM nuôi dưỡng các thành phần sống của phức hợp ngà–tủy.\nLấy tủy một phần thường chỉ định với răng chưa đóng kín chóp.";
+const digest = "### Tủy\n\nTủy chứa HTMM nuôi dưỡng các thành phần sống của phức hợp ngà–tủy.\n\nLấy tủy một phần thường chỉ định với răng chưa đóng kín chóp.";
 const checks = [1, 2, 3].map((unit) => ({ unit, references: [unit === 3 ? "E2" : "E1"], issue: "" }));
 const completion = (value: unknown) => Response.json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(value) } }] });
+
+it("reviews complete wrapped passages without losing clinical conditions or numeric boundaries", () => {
+  const wrapped = "### Điều trị\nLấy tủy một phần:\nthường chỉ định với răng chưa đóng kín chóp.\n\nNgưỡng nguồn là\n30\nđơn vị.\n### Theo dõi\nGiữ điều kiện của nguồn.";
+  expect(summaryReviewUnits(wrapped)).toEqual([
+    "### Điều trị", "Lấy tủy một phần:\nthường chỉ định với răng chưa đóng kín chóp.",
+    "Ngưỡng nguồn là\n30\nđơn vị.", "### Theo dõi", "Giữ điều kiện của nguồn.",
+  ]);
+  expect(sourcePreservingIssue("Ngưỡng trong nguồn là 3 0 đơn vị.", "Ngưỡng trong nguồn là 30 đơn vị.")).not.toBeNull();
+});
 
 it("refuses a global pass, missing/reordered line decisions and nonexistent or empty support", () => {
   for (const value of [

@@ -15,6 +15,7 @@ export function vietnameseMessage(message: string, status?: number): string {
     [/not configured|configuration|missing.*key|API_KEY|SESSION_SECRET/i, "Ứng dụng chưa hoàn tất kết nối dịch vụ. Vui lòng liên hệ người quản lý."],
     [/credits/i, "Dịch vụ AI đã hết hạn mức sử dụng. Bản hiện hành vẫn được giữ."],
     [/NVIDIA rejected/i, "Chưa truy cập được mô hình AI đã cấu hình. Vui lòng liên hệ người quản lý."],
+    [/NVIDIA.*(?:incomplete|no final answer|did not complete)/i, "AI chưa trả về đầy đủ nội dung. Phần đã xử lý vẫn được giữ; chọn Tiếp tục để thử lại bước còn thiếu."],
     [/ambiguous|unsupported answers|source-backed quiz|assessment review|Question generation|malformed structured|incomplete.*assessment/i, "Một số câu hỏi chưa đạt yêu cầu về đáp án hoặc chứng cứ. Thử lại để tạo lại phần này; bản cũ vẫn được giữ."],
     [/digest|summary/i, "Chưa tạo được bản tóm tắt đạt yêu cầu. Thử lại để tiếp tục từ phần đã lưu."],
     [/no readable|too little text|OCR/i, "Chưa đọc được đủ văn bản từ PDF. Tài liệu scan cần nhận dạng chữ trước khi tạo học liệu."],
