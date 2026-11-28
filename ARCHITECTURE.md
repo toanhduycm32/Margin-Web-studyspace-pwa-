@@ -30,7 +30,7 @@ Final language policy candidate: MiniMax remains the primary for Vietnamese sour
 
 ## Data flow
 
-Release checkpoint: the bounded foreign-source quiz request timed out before any accepted output. The broader language policy above remains a candidate, not a released/qualified capability. The owner has been asked whether the first release should explicitly limit new generation to Vietnamese sources or continue holding release for English-source reliability. No silent language restriction is implemented and no production release has occurred while that decision is pending.
+Release checkpoint reconciliation: the bounded foreign-source quiz timed out safely before accepted output; a transport diagnostic confirms provider reasoning continued until the unchanged 260s deadline. Foreign-source quiz latency is not qualified. Preserve the full language functionality and disclose this limitation. The final attachment's release acceptance is a representative real Vietnamese chapter, not universal foreign-source performance: that chapter's content, quiz and persistence checks pass. No language restriction is introduced, and no further model campaign is justified. Actual deployed verification remains required before closure. See STATUS.md for the current delivery state and AI_QUALITY_DECISIONS.md for retained failures.
 
 ```text
 iPhone / browser

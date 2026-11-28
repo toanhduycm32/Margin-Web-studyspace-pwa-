@@ -49,10 +49,12 @@ it.skipIf(!process.env.MARGIN_QUALIFY_OUTPUT)("qualifies complete model output w
   vi.stubEnv("NVIDIA_FALLBACK_MODEL", model);
   vi.stubGlobal("fetch", async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
     if (String(url) !== "https://integrate.api.nvidia.com/v1/chat/completions") return originalFetch(url, init);
-    if (calls.length >= 8 || Date.now() - operationStarted > 900_000) throw Error("Diagnostic operation budget exhausted");
+    const configuredCalls = Number(process.env.MARGIN_QUALIFY_MAX_CALLS || 8);
+    const maxCalls = Number.isFinite(configuredCalls) ? Math.max(1, Math.min(8, Math.floor(configuredCalls))) : 8;
+    if (calls.length >= maxCalls || Date.now() - operationStarted > 900_000) throw Error("Diagnostic operation budget exhausted");
     const body = JSON.parse(String(init?.body));
     if (body.model !== model) throw Error("Fallback prohibited during model qualification");
-    body.stream = kind !== "section" && process.env.MARGIN_QUALIFY_RUNTIME !== "1";
+    body.stream = process.env.MARGIN_QUALIFY_STREAM === "1" || (kind !== "section" && process.env.MARGIN_QUALIFY_RUNTIME !== "1");
     if (replay && replayed < replayCount) {
       const prior = replay.calls[replayed];
       if (JSON.stringify(prior.request) !== JSON.stringify(body) || prior.finish !== "stop" || !prior.content) {
