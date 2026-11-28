@@ -35,6 +35,19 @@ it("rejects invented terms, removed prepositions and changed causal subjects bef
   expect(sourcePreservingIssue(text, "### Tủy\n- **Lấy tủy một phần thường chỉ định với răng chưa đóng kín chóp.**")).toBeNull();
 });
 
+it("accepts all real source anchors for a long passage without hiding material omissions", () => {
+  const lines = Array.from({ length: 21 }, (_, index) => `Dòng nguồn ${index + 1}.`);
+  const references = lines.map((_, index) => `E${index + 1}`);
+  const review = { checks: [{ unit: 1, references, issue: "" }], omissions: ["Thiếu phân loại chóp đã nêu trong tiêu đề."] };
+  expect(validateSummaryReview(review, lines.join("\n"), lines.join(" ")))
+    .toMatchObject({ valid: false, issues: review.omissions });
+  expect(validateSummaryReview({ ...review, omissions: [] }, lines.join("\n"), lines.join(" ")).valid).toBe(true);
+  for (const invalid of [[...references, "E22"], ["E1", "E1"], ["E99"]]) {
+    expect(() => validateSummaryReview({ ...review, checks: [{ unit: 1, references: invalid, issue: "" }] },
+      lines.join("\n"), lines.join(" "))).toThrow();
+  }
+});
+
 it("repairs an incomplete reviewer decision across checkpoints without regenerating the candidate", async () => {
   vi.stubEnv("NVIDIA_API_KEY", "test-key-only");
   const request = vi.fn().mockResolvedValueOnce(completion({ digest }))

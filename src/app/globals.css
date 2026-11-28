@@ -46,3 +46,7 @@ h1,h2,h3,p{margin-top:0}h1,h2{font-family:Georgia,'Times New Roman',serif;font-w
 .summary-table table { width: 100%; border-collapse: collapse; font-size: .9em; }
 .summary-table th, .summary-table td { padding: .7rem; border-bottom: 1px solid #deddd7; text-align: left; vertical-align: top; min-width: 8rem; }
 .summary-table th { font-weight: 600; }
+
+/* Georgia on Windows falls back per glyph for Vietnamese stacked accents. */
+html[lang="vi"] h1,html[lang="vi"] h2,html[lang="vi"] .processing h3,
+html[lang="vi"] .summary-body h3,html[lang="vi"] .reader-name{font-family:'Times New Roman',serif}
