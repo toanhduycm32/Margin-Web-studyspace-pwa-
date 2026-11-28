@@ -30,6 +30,8 @@ Final language policy candidate: MiniMax remains the primary for Vietnamese sour
 
 ## Data flow
 
+Release checkpoint: the bounded foreign-source quiz request timed out before any accepted output. The broader language policy above remains a candidate, not a released/qualified capability. The owner has been asked whether the first release should explicitly limit new generation to Vietnamese sources or continue holding release for English-source reliability. No silent language restriction is implemented and no production release has occurred while that decision is pending.
+
 ```text
 iPhone / browser
   → Next.js UI and authenticated API
